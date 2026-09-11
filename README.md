@@ -2,6 +2,8 @@
 
 procedural mines for roblox. every server gets a new one. tunnels generate around you as you explore, every cave connects to every other one, and ore grows on the walls.
 
+**[play it on roblox](https://www.roblox.com/games/115998376881963/Procedural-cave)**
+
 ![gold glowing next to a side tunnel](progress/08-gold.png)
 
 ## what's in it

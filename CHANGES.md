@@ -35,5 +35,6 @@
 - new mine every server: random seed, shown in the corner. LOCK_SEED in Start.server.luau keeps it the same
 - first tunnel's ore and lanterns moved further out, the dug-out spawn room reached them and left the ore floating
 - tidied the repo: scripts in src/ (Test.server.luau is Start.server.luau now, Dig.client.luau is Pickaxe.client.luau), MIT licence, readme rewritten
+- it's public on roblox now, play link at the top of the readme
 - pickaxe was held backwards, head behind you. flipped the grip, and the swing is now a slow lift and a fast strike instead of the other way round
 - ores sit where the wall really is (blending the air/rock values) instead of the voxel edge, which was 1-3 studs behind the visible wall
