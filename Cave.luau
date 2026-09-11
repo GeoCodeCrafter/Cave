@@ -524,6 +524,92 @@ function Cave.preview(center: Vector3?, radius: number?): Vector3
 	return spot
 end
 
+-- a dug-out room with a plank floor, support beams, a lantern and a real SpawnLocation.
+-- it sits on a node so the tunnels always connect to it. returns where players spawn
+function Cave.buildSpawnRoom(center: Vector3?): CFrame
+	local spot = Cave.preview(center, 2)
+	local floorY = spot.Y - 3
+	local size = Vector3.new(26, 12, 26)
+	local middle = Vector3.new(spot.X, floorY + size.Y / 2, spot.Z)
+
+	terrain:FillBlock(CFrame.new(middle), size, Enum.Material.Air)
+
+	-- anything generated inside the room would be floating now
+	local half = size / 2 + Vector3.one * 2
+	for _, folder in { getOreFolder(), getFolder("Lanterns") } do
+		for _, model in folder:GetChildren() do
+			if model:IsA("Model") then
+				local offset = model:GetPivot().Position - middle
+				if math.abs(offset.X) < half.X and math.abs(offset.Y) < half.Y and math.abs(offset.Z) < half.Z then
+					model:Destroy()
+				end
+			end
+		end
+	end
+
+	local old = Workspace:FindFirstChild("SpawnRoom")
+	if old then
+		old:Destroy()
+	end
+	local room = Instance.new("Model")
+	room.Name = "SpawnRoom"
+
+	local wood = Color3.fromRGB(110, 78, 50)
+	local function block(name: string, partSize: Vector3, cframe: CFrame, material: Enum.Material, color: Color3)
+		local part = Instance.new("Part")
+		part.Name = name
+		part.Anchored = true
+		part.Size = partSize
+		part.CFrame = cframe
+		part.Material = material
+		part.Color = color
+		part.Parent = room
+		return part
+	end
+
+	block("Floor", Vector3.new(size.X, 2, size.Z), CFrame.new(spot.X, floorY - 1, spot.Z), Enum.Material.WoodPlanks, wood)
+
+	-- four posts and beams across the ceiling, like a propped-up mine room
+	local postHeight = size.Y - 1
+	for _, corner in { Vector3.new(1, 0, 1), Vector3.new(-1, 0, 1), Vector3.new(1, 0, -1), Vector3.new(-1, 0, -1) } do
+		local at = Vector3.new(spot.X + corner.X * (size.X / 2 - 1.5), floorY + postHeight / 2, spot.Z + corner.Z * (size.Z / 2 - 1.5))
+		block("Post", Vector3.new(1.2, postHeight, 1.2), CFrame.new(at), Enum.Material.Wood, wood)
+	end
+	for _, sign in { 1, -1 } do
+		local z = spot.Z + sign * (size.Z / 2 - 1.5)
+		block("Beam", Vector3.new(size.X - 1, 1.2, 1.2), CFrame.new(spot.X, floorY + postHeight, z), Enum.Material.Wood, wood)
+	end
+
+	local pad = Instance.new("SpawnLocation")
+	pad.Name = "CaveSpawn"
+	pad.Anchored = true
+	pad.Neutral = true
+	pad.Duration = 0
+	pad.Size = Vector3.new(6, 0.4, 6)
+	pad.CFrame = CFrame.new(spot.X, floorY + 0.2, spot.Z)
+	pad.Material = Enum.Material.Slate
+	pad.Color = Color3.fromRGB(70, 62, 56)
+	pad.Parent = room
+
+	local light = Instance.new("PointLight")
+	light.Color = Cave.settings.lantern.color
+	light.Brightness = 2
+	light.Range = 30
+	light.Shadows = true
+	light.Parent = block("Lamp", Vector3.new(1.2, 1.2, 1.2), CFrame.new(spot.X, floorY + postHeight - 1.2, spot.Z), Enum.Material.Neon, Cave.settings.lantern.color)
+
+	room.Parent = Workspace
+
+	-- only spawn in the mine
+	for _, other in Workspace:GetDescendants() do
+		if other:IsA("SpawnLocation") and other ~= pad then
+			other.Enabled = false
+		end
+	end
+
+	return pad.CFrame + Vector3.new(0, 3, 0)
+end
+
 -- does the terrain roblox built match what the code thinks is rock/air?
 function Cave.check()
 	local spot = Cave.findSpawn()

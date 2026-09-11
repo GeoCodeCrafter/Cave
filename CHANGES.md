@@ -13,4 +13,5 @@
 - ores were still a couple of studs inside the rock, roblox draws the wall further into the tunnel than the maths. added oreOffset to push them out
 - lighting: a lantern on a chain at every tunnel junction, gold and diamond glow, dark warm ambient, haze, bloom, slight colour grade
 - mining: click ore to hit it (coal 3 hits up to diamond 12), it shakes and throws chips, breaks into bits on the last hit, goes on the leaderboard, grows back later. server checks reach and a cooldown
+- kept falling forever on play: the server teleported you before the terrain reached your computer. added a spawn room (plank floor, beams, lamp, real SpawnLocation) dug out at a junction, and players only spawn once the mine is built and streamed in. respawns you there when you die
 - ores sit where the wall really is (blending the air/rock values) instead of the voxel edge, which was 1-3 studs behind the visible wall

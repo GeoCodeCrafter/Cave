@@ -1,16 +1,39 @@
-local Cave = require(game.ServerScriptService.Cave)
+local Players = game:GetService("Players")
 
+-- nobody spawns until the mine exists, otherwise you land before the terrain does and fall forever
+Players.CharacterAutoLoads = false
+
+local Cave = require(game.ServerScriptService.Cave)
 Cave.settings.seed = 1
 
 -- wipe whatever preview() left in the place so there aren't two copies of every ore
 Cave.clear()
--- build around a real tunnel first so nobody spawns inside rock
-local spot = Cave.preview(nil, 2)
+local spawnAt = Cave.buildSpawnRoom()
 Cave.start()
 
-game.Players.PlayerAdded:Connect(function(player)
-	player.CharacterAdded:Connect(function(char)
-		task.wait()
-		char:PivotTo(CFrame.new(spot + Vector3.new(0, 3, 0)))
+local function spawn(player: Player)
+	-- make sure the terrain around the spawn has reached this player's computer first
+	pcall(function()
+		player:RequestStreamAroundAsync(spawnAt.Position)
 	end)
-end)
+	player:LoadCharacter()
+end
+
+local function setup(player: Player)
+	player.CharacterAdded:Connect(function(char)
+		local humanoid = char:WaitForChild("Humanoid") :: Humanoid
+		humanoid.Died:Connect(function()
+			task.wait(3)
+			if player.Parent then
+				spawn(player)
+			end
+		end)
+	end)
+	spawn(player)
+end
+
+Players.PlayerAdded:Connect(setup)
+-- anyone who joined while the mine was being built
+for _, player in Players:GetPlayers() do
+	task.spawn(setup, player)
+end
