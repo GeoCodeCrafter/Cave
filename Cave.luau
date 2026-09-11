@@ -1,6 +1,7 @@
 --!strict
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 
 local terrain = Workspace.Terrain
 
@@ -230,20 +231,45 @@ function Cave.around(pos: Vector3)
 	end
 end
 
--- for looking at it in edit mode, run from the command bar
-function Cave.preview(center: Vector3?, radius: number?)
+-- somewhere in a tunnel: air here and above, solid floor underneath
+function Cave.findSpawn(near: Vector3?): Vector3
+	local c = near or Vector3.new(0, -40, 0)
+	local up, down = Vector3.new(0, 4, 0), Vector3.new(0, -6, 0)
+	for r = 0, 240, 8 do
+		for i = 0, 15 do
+			local angle = i / 16 * math.pi * 2
+			local x, z = c.X + math.cos(angle) * r, c.Z + math.sin(angle) * r
+			for y = math.min(c.Y, -12), c.Y - 160, -4 do
+				local p = Vector3.new(x, y, z)
+				if airness(p) > 0.05 and airness(p + up) > 0.05 and airness(p + down) < -0.05 then
+					return p
+				end
+			end
+		end
+	end
+	warn("Cave.findSpawn found no tunnel, using", c)
+	return c
+end
+
+-- for looking at it in edit mode, run from the command bar. puts the camera in a tunnel
+function Cave.preview(center: Vector3?, radius: number?): Vector3
 	local size = CHUNK * VOXEL
-	local c = center or Vector3.new(0, -40, 0)
+	local spot = Cave.findSpawn(center)
 	local r = radius or 3
 	Cave.applyColors()
-	local cx, cy, cz = math.floor(c.X / size), math.floor(c.Y / size), math.floor(c.Z / size)
-	for dy = -2, 0 do
+	local cx, cy, cz = math.floor(spot.X / size), math.floor(spot.Y / size), math.floor(spot.Z / size)
+	for dy = -2, 1 do
 		for dx = -r, r do
 			for dz = -r, r do
 				Cave.generateChunk(cx + dx, cy + dy, cz + dz)
 			end
 		end
 	end
+	if not RunService:IsRunning() then
+		local eye = spot + Vector3.new(0, 2, 0)
+		Workspace.CurrentCamera.CFrame = CFrame.lookAt(eye, eye + Vector3.new(0, 0, 10))
+	end
+	return spot
 end
 
 function Cave.clear()
