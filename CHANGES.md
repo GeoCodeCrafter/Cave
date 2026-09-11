@@ -18,4 +18,5 @@
 - walls: thin stripes running through each rock layer, less saturated colours, lanterns and fog more neutral so it's not all one orange
 - big caverns: 1 junction in 14 gets a huge flattened dome (75-110 studs across) with 2-4 rock pillars instead of a chamber. pillars left a few 1-voxel sealed pockets in the sim so lone air voxels get filled back in
 - biomes: big regions of crystal caves (basalt + violet ice walls, glowing neon crystals, pale floor) and mushroom caves (mud walls, mossy floor, glowing mushrooms). both light themselves so no lanterns there. Cave.findBiome("crystal") jumps to one
+- digging: hold click on rock to carve through it, dust in the rock's colour. server checks reach, cooldown, top of the mine and keeps the spawn room safe. Dig.client.luau goes in StarterPlayerScripts
 - ores sit where the wall really is (blending the air/rock values) instead of the voxel edge, which was 1-3 studs behind the visible wall

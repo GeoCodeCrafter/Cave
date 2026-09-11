@@ -5,6 +5,7 @@ local RunService = game:GetService("RunService")
 local Lighting = game:GetService("Lighting")
 local Debris = game:GetService("Debris")
 local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local terrain = Workspace.Terrain
 
@@ -81,6 +82,9 @@ Cave.settings = {
 	},
 	mineReach = 14, -- studs
 	mineCooldown = 0.2, -- seconds between hits, stops autoclickers
+	digRadius = 3.5, -- studs, size of each bite when you hold click on rock
+	digReach = 16,
+	digCooldown = 0.12,
 }
 
 local done: { [string]: boolean } = {}
@@ -1091,10 +1095,93 @@ function Cave.enableMining()
 	end)
 end
 
+-- ============================================================ digging
+
+local lastDig: { [Player]: number } = {}
+
+local function dust(at: Vector3)
+	local cell = Vector3.new(math.floor(at.X / VOXEL), math.floor(at.Y / VOXEL), math.floor(at.Z / VOXEL)) * VOXEL
+	local mats = terrain:ReadVoxels(Region3.new(cell, cell + Vector3.one * VOXEL), VOXEL)
+	local ok, color = pcall(function()
+		return terrain:GetMaterialColor(mats[1][1][1])
+	end)
+
+	local puff = Instance.new("Part")
+	puff.Anchored = true
+	puff.CanCollide = false
+	puff.CanQuery = false
+	puff.Transparency = 1
+	puff.Size = Vector3.one
+	puff.CFrame = CFrame.new(at)
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Color = ColorSequence.new(if ok then color else Color3.fromRGB(120, 110, 100))
+	emitter.Size = NumberSequence.new(0.5, 0)
+	emitter.Speed = NumberRange.new(6, 12)
+	emitter.SpreadAngle = Vector2.new(180, 180)
+	emitter.Lifetime = NumberRange.new(0.3, 0.7)
+	emitter.Acceleration = Vector3.new(0, -40, 0)
+	emitter.Rate = 0
+	emitter.Parent = puff
+	puff.Parent = Workspace
+	emitter:Emit(14)
+	Debris:AddItem(puff, 1)
+end
+
+local function insideSpawnRoom(at: Vector3): boolean
+	local room = Workspace:FindFirstChild("SpawnRoom")
+	if not room or not room:IsA("Model") then
+		return false
+	end
+	local cf, size = room:GetBoundingBox()
+	local p = cf:PointToObjectSpace(at)
+	local half = size / 2 + Vector3.one * 3
+	return math.abs(p.X) < half.X and math.abs(p.Y) < half.Y + 6 and math.abs(p.Z) < half.Z
+end
+
+-- the client (Dig.client.luau) sends where you're pointing, the server decides if you're allowed
+function Cave.enableDigging()
+	local remote = ReplicatedStorage:FindFirstChild("CaveDig") :: RemoteEvent?
+	if not remote then
+		local created = Instance.new("RemoteEvent")
+		created.Name = "CaveDig"
+		created.Parent = ReplicatedStorage
+		remote = created
+	end
+
+	(remote :: RemoteEvent).OnServerEvent:Connect(function(player, at)
+		if typeof(at) ~= "Vector3" then
+			return
+		end
+		local s = Cave.settings
+		local now = os.clock()
+		if now - (lastDig[player] or 0) < s.digCooldown then
+			return
+		end
+		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if not root or (root.Position - at).Magnitude > s.digReach then
+			return
+		end
+		if at.Y > s.top - 2 or insideSpawnRoom(at) then
+			return
+		end
+		lastDig[player] = now
+
+		-- aim the bite a little into the wall, not centred on the surface
+		local into = (at - root.Position).Unit
+		dust(at - into)
+		terrain:FillBall(at + into, s.digRadius, Enum.Material.Air)
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		lastDig[player] = nil
+	end)
+end
+
 function Cave.start()
 	Cave.applyColors()
 	Cave.applyLighting()
 	Cave.enableMining()
+	Cave.enableDigging()
 	task.spawn(function()
 		while true do
 			for _, player in Players:GetPlayers() do

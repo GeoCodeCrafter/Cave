@@ -45,3 +45,11 @@
 **12 · caverns.** 1 junction in 14 is a huge flattened dome with rock pillars instead of a normal chamber. seen from outside here so you can see how many there are. the pillars left a few single-voxel air bubbles in the sim, so lone air voxels get filled back in
 
 ![caverns from outside](progress/12-caverns.png)
+
+**13 · crystal caves.** big regions of the mine turn into basalt and violet ice with neon crystals growing out of every surface. they light themselves so there's no lanterns down here
+
+![inside a crystal tunnel](progress/13-crystal-tunnel.png)
+
+**14 · where the biomes meet.** crystal on the left running into plain striped rock on the right. there's mushroom caves too, mossy floors and glowing mushrooms
+
+![crystal biome next to plain rock](progress/14-crystal-meets-rock.png)
