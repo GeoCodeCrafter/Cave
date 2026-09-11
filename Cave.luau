@@ -56,9 +56,9 @@ Cave.settings = {
 		-- mushroom biome
 		[Enum.Material.Mud] = Color3.fromRGB(58, 50, 46),
 		[Enum.Material.LeafyGrass] = Color3.fromRGB(38, 72, 64),
-		-- flooded biome
-		[Enum.Material.Cobblestone] = Color3.fromRGB(70, 86, 84),
-		[Enum.Material.Sand] = Color3.fromRGB(96, 104, 92),
+		-- tide pool biome
+		[Enum.Material.Cobblestone] = Color3.fromRGB(92, 90, 86),
+		[Enum.Material.Sand] = Color3.fromRGB(150, 140, 118),
 	},
 	-- plain rock areas only, chances per ceiling/floor voxel
 	decor = {
@@ -76,10 +76,11 @@ Cave.settings = {
 		mushroomChance = 0.05, -- per floor voxel
 		crystalColors = { Color3.fromRGB(170, 90, 255), Color3.fromRGB(80, 225, 255), Color3.fromRGB(255, 105, 215) },
 		mushroomColors = { Color3.fromRGB(60, 255, 200), Color3.fromRGB(90, 170, 255), Color3.fromRGB(160, 255, 90) },
-		-- flooded caves come out of the plain rock. higher = fewer
-		floodedAbove = 0.15,
-		waterLevel = 0.42, -- how far up each 64 stud layer the water comes
-		algaeChance = 0.03, -- per wall voxel
+		-- tide pool caves come out of the plain rock. higher = fewer
+		poolsAbove = 0.15,
+		poolChance = 0.03, -- per flat floor voxel
+		poolColors = { Color3.fromRGB(255, 110, 170), Color3.fromRGB(255, 150, 70), Color3.fromRGB(70, 230, 210) },
+		algaeChance = 0.015, -- per wall voxel
 		algaeColors = { Color3.fromRGB(80, 255, 170), Color3.fromRGB(60, 220, 255) },
 	},
 	radius = 2, -- chunks around each player
@@ -320,10 +321,10 @@ local function biomeAt(p: Vector3): string
 	elseif n < b.mushroomBelow then
 		return "mushroom"
 	end
-	-- a second, separate map for the flooded bits, so they're not stuck between the other two
+	-- a second, separate map for the tide pool bits, so they're not stuck between the other two
 	local f = math.noise(p.X * b.scale - 31.4, p.Y * b.scale * 0.5 + Cave.settings.seed * 3.3, p.Z * b.scale + 12.9)
-	if f > b.floodedAbove then
-		return "flooded"
+	if f > b.poolsAbove then
+		return "pools"
 	end
 	return "rock"
 end
@@ -341,7 +342,7 @@ local function materialAt(p: Vector3, isFloor: boolean): Enum.Material
 		return if math.noise(p.X * 0.06, p.Y * 0.06, p.Z * 0.06 + o) > 0.2 then Enum.Material.Glacier else Enum.Material.Basalt
 	elseif biome == "mushroom" then
 		return if isFloor then Enum.Material.LeafyGrass else Enum.Material.Mud
-	elseif biome == "flooded" then
+	elseif biome == "pools" then
 		return if isFloor then Enum.Material.Sand else Enum.Material.Cobblestone
 	end
 
@@ -396,10 +397,10 @@ function Cave.applyLighting()
 	Lighting.EnvironmentSpecularScale = 0.5
 	Lighting.GlobalShadows = true
 
-	-- still, dark cave water for the puddles
-	terrain.WaterColor = Color3.fromRGB(34, 64, 72)
-	terrain.WaterTransparency = 0.55
-	terrain.WaterReflectance = 0.35
+	-- still, clear water so you can see what's at the bottom of the pools
+	terrain.WaterColor = Color3.fromRGB(34, 120, 130)
+	terrain.WaterTransparency = 0.85
+	terrain.WaterReflectance = 0.25
 	terrain.WaterWaveSize = 0
 	terrain.WaterWaveSpeed = 0
 
@@ -623,6 +624,59 @@ local function placeAlgae(wall: Vector3, normal: Vector3, rng: Random)
 	keep(model, "Decor")
 end
 
+-- a little pool sunk into the floor: clear water, a ring of wet stones, glowing bits on the bottom
+local function placeTidePool(floor: Vector3, rng: Random)
+	local b = Cave.settings.biomes
+	local r = rng:NextNumber(4, 7)
+	-- the water replaces the rock under the floor, so it sits in a basin and can't float
+	terrain:FillCylinder(CFrame.new(floor - Vector3.new(0, 2, 0)), 4, r * 0.8, Enum.Material.Water)
+
+	local model = Instance.new("Model")
+	model.Name = "TidePool"
+
+	local stones = rng:NextInteger(6, 10)
+	for i = 1, stones do
+		local angle = (i / stones) * math.pi * 2 + rng:NextNumber(-0.25, 0.25)
+		local dist = r * rng:NextNumber(0.78, 0.95)
+		local size = Vector3.new(rng:NextNumber(0.8, 2), rng:NextNumber(0.5, 1.2), rng:NextNumber(0.8, 2))
+		local stone = Instance.new("Part")
+		stone.Name = "Stone"
+		stone.Anchored = true
+		stone.Material = Enum.Material.Slate
+		stone.Color = Color3.fromRGB(54, 56, 58):Lerp(Color3.fromRGB(92, 90, 86), rng:NextNumber())
+		stone.Size = size
+		stone.CFrame = CFrame.new(floor + Vector3.new(math.cos(angle) * dist, size.Y * 0.2, math.sin(angle) * dist))
+			* CFrame.Angles(rng:NextNumber(-0.3, 0.3), rng:NextNumber(0, 6.28), rng:NextNumber(-0.3, 0.3))
+		stone.Parent = model
+	end
+
+	for _ = 1, rng:NextInteger(3, 6) do
+		local angle, dist = rng:NextNumber(0, 6.28), r * rng:NextNumber(0, 0.55)
+		local size = rng:NextNumber(0.4, 0.9)
+		local blob = Instance.new("Part")
+		blob.Name = "Anemone"
+		blob.Shape = Enum.PartType.Ball
+		blob.Anchored = true
+		blob.CanCollide = false
+		blob.CastShadow = false
+		blob.Material = Enum.Material.Neon
+		blob.Color = b.poolColors[rng:NextInteger(1, #b.poolColors)]
+		blob.Size = Vector3.one * size
+		blob.CFrame = CFrame.new(floor + Vector3.new(math.cos(angle) * dist, -3.4 + size / 2, math.sin(angle) * dist))
+		blob.Parent = model
+	end
+
+	-- a soft glow from under the water
+	local light = Instance.new("PointLight")
+	light.Color = Color3.fromRGB(90, 220, 230)
+	light.Range = r * 2.5
+	light.Brightness = 1.2
+	light.Shadows = false
+	light.Parent = model:FindFirstChild("Anemone")
+
+	keep(model, "Decor")
+end
+
 -- the colour of the rock at a point, so spikes and rubble match the wall they grow out of
 local function rockColor(p: Vector3): Color3
 	local ok, color = pcall(function()
@@ -799,32 +853,6 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 		end
 	end
 
-	-- flooding: every layer has a flat water line. open space under it in a flooded area turns to
-	-- water, but only if there's rock somewhere under that column. roblox water doesn't flow, so
-	-- water over a drop into the chunk below would just hang in the air
-	local level = (cy + s.biomes.waterLevel) * SIZE
-	for x = 1, CHUNK do
-		for z = 1, CHUNK do
-			local under = min + Vector3.new((x - 0.5) * VOXEL, -VOXEL / 2, (z - 0.5) * VOXEL)
-			local supported = not (air[x][1][z] and airness(under) > 0)
-			for y = 1, CHUNK do
-				local py = min.Y + (y - 0.5) * VOXEL
-				if py >= level then
-					break
-				end
-				if not air[x][y][z] then
-					supported = true
-				elseif supported then
-					local p = Vector3.new(min.X + (x - 0.5) * VOXEL, py, min.Z + (z - 0.5) * VOXEL)
-					if biomeAt(p) == "flooded" then
-						materials[x][y][z] = Enum.Material.Water
-						occupancy[x][y][z] = 1
-					end
-				end
-			end
-		end
-	end
-
 	terrain:WriteVoxels(Region3.new(min, min + Vector3.one * SIZE), VOXEL, materials, occupancy)
 
 	-- put back any digging that happened here before the chunk was unloaded
@@ -876,9 +904,19 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 								if normal.Y > 0.6 then
 									placeMushroom(wall + normal * s.oreOffset, rng)
 								end
-							elseif biome == "flooded" and rng:NextNumber() < s.biomes.algaeChance then
-								local wall, normal = wallBetween(p, open)
-								placeAlgae(wall, normal, rng)
+							elseif biome == "pools" then
+								local roll = rng:NextNumber()
+								-- pools stay away from chunk edges, the next chunk to load would cut them in half
+								local inner = x >= 3 and x <= CHUNK - 2 and z >= 3 and z <= CHUNK - 2
+								if open == Vector3.yAxis and inner and roll < s.biomes.poolChance then
+									local wall, normal = wallBetween(p, open)
+									if normal.Y > 0.8 then
+										placeTidePool(wall, rng)
+									end
+								elseif open ~= Vector3.yAxis and roll < s.biomes.algaeChance then
+									local wall, normal = wallBetween(p, open)
+									placeAlgae(wall, normal, rng)
+								end
 							elseif biome == "rock" and (open == Vector3.yAxis or open == -Vector3.yAxis) then
 								local d = s.decor
 								local roll = rng:NextNumber()
