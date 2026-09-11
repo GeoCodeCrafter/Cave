@@ -29,7 +29,16 @@ Cave.settings = {
 }
 
 local done: { [string]: boolean } = {}
-local oreFolder: Folder
+
+local function getOreFolder(): Folder
+	local folder = Workspace:FindFirstChild("Ores")
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = "Ores"
+		folder.Parent = Workspace
+	end
+	return folder :: Folder
+end
 
 -- > 0 means air
 local function airness(p: Vector3): number
@@ -65,7 +74,7 @@ local function placeOre(ore, pos: Vector3, rng: Random)
 	part.Color = ore.color
 	part.Material = Enum.Material.Rock
 	part:SetAttribute("Ore", ore.name)
-	part.Parent = oreFolder
+	part.Parent = getOreFolder()
 end
 
 function Cave.generateChunk(cx: number, cy: number, cz: number)
@@ -141,11 +150,28 @@ function Cave.around(pos: Vector3)
 	end
 end
 
-function Cave.start()
-	oreFolder = Instance.new("Folder")
-	oreFolder.Name = "Ores"
-	oreFolder.Parent = Workspace
+-- for looking at it in edit mode, run from the command bar
+function Cave.preview(center: Vector3?, radius: number?)
+	local size = CHUNK * VOXEL
+	local c = center or Vector3.new(0, -40, 0)
+	local r = radius or 3
+	local cx, cy, cz = math.floor(c.X / size), math.floor(c.Y / size), math.floor(c.Z / size)
+	for dy = -2, 0 do
+		for dx = -r, r do
+			for dz = -r, r do
+				Cave.generateChunk(cx + dx, cy + dy, cz + dz)
+			end
+		end
+	end
+end
 
+function Cave.clear()
+	terrain:Clear()
+	getOreFolder():ClearAllChildren()
+	table.clear(done)
+end
+
+function Cave.start()
 	task.spawn(function()
 		while true do
 			for _, player in Players:GetPlayers() do
