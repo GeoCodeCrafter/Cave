@@ -17,6 +17,10 @@ procedural mines for roblox. tunnels generate around you as you explore, every c
 
 ## setup
 
+with [rojo](https://rojo.space): `rokit install`, then `rojo serve` and hit connect in the studio plugin. it puts everything below in the right place and sets lighting to Future for you. you still need step 5.
+
+or by hand:
+
 1. put `Cave.luau` in ServerScriptService as a ModuleScript called `Cave`
 2. put `Test.server.luau` next to it as a Script. it builds the area around a tunnel and spawns you in it
 3. put `Dig.client.luau` in StarterPlayerScripts as a LocalScript. it's the pickaxe: equip it and hold click to mine ore and dig rock
@@ -24,7 +28,5 @@ procedural mines for roblox. tunnels generate around you as you explore, every c
 5. to keep ore counts between sessions, publish the place and turn on Studio Access to API Services (File → Experience Settings → Security)
 
 everything you'd want to tweak is in `Cave.settings` at the top of the module.
-
-## how it got here
 
 every screenshot with what went wrong at each step is in [PROGRESS.md](PROGRESS.md). the change log is in [CHANGES.md](CHANGES.md).

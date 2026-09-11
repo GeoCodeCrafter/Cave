@@ -1,0 +1,26 @@
+{
+  "name": "Cave",
+  "tree": {
+    "$className": "DataModel",
+    "ServerScriptService": {
+      "Cave": {
+        "$path": "Cave.luau"
+      },
+      "Test": {
+        "$path": "Test.server.luau"
+      }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "Dig": {
+          "$path": "Dig.client.luau"
+        }
+      }
+    },
+    "Lighting": {
+      "$properties": {
+        "Technology": "Future"
+      }
+    }
+  }
+}
