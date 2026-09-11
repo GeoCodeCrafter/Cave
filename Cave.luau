@@ -46,6 +46,9 @@ Cave.settings = {
 
 local done: { [string]: boolean } = {}
 
+Cave.placed = 0
+Cave.skipped = 0 -- raycast found no wall, so no ore
+
 local function getOreFolder(): Folder
 	local folder = Workspace:FindFirstChild("Ores")
 	if not folder then
@@ -127,9 +130,11 @@ local function placeOre(ore, wall: Vector3, normal: Vector3, rng: Random)
 		part.Anchored = true
 		part.CanCollide = true
 		part.Size = Vector3.new(rng:NextNumber(0.8, 2.2), rng:NextNumber(0.8, 2.6), rng:NextNumber(0.8, 2.2))
-		local offset = side * rng:NextNumber(-1.8, 1.8) + up * rng:NextNumber(-1.8, 1.8)
-		local out = normal * rng:NextNumber(0, 1.2)
-		part.CFrame = CFrame.lookAt(wall + offset + out, wall + offset + out + normal)
+		local offset = side * rng:NextNumber(-1.5, 1.5) + up * rng:NextNumber(-1.5, 1.5)
+		local out = normal * rng:NextNumber(-0.2, 0.8)
+		local pos = wall + offset + out
+		-- lookAt breaks if you look straight along its up vector, so floors/ceilings need a different one
+		part.CFrame = CFrame.lookAt(pos, pos + normal, if math.abs(normal.Y) > 0.9 then Vector3.xAxis else Vector3.yAxis)
 			* CFrame.Angles(rng:NextNumber(-0.6, 0.6), rng:NextNumber(-0.6, 0.6), rng:NextNumber(0, 6.28))
 		part.Color = ore.color
 		part.Material = ore.material
@@ -189,26 +194,37 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 	local region = Region3.new(min, min + Vector3.one * CHUNK * VOXEL)
 	terrain:WriteVoxels(region, VOXEL, materials, occupancy)
 
-	-- ore on walls: solid voxels with air right next to them
+	-- ore on walls. pick rock voxels next to air, then stand in the air and raycast back at
+	-- the wall, so the ore sits on the surface roblox actually drew instead of where the
+	-- voxel maths thinks it is (smooth terrain doesn't put the surface on the voxel edge)
 	local rng = Random.new(s.seed * 1e6 + cx * 7919 + cy * 104729 + cz * 1299709)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = { terrain }
+
 	for x = 2, CHUNK - 1 do
 		for y = 2, CHUNK - 1 do
 			for z = 2, CHUNK - 1 do
 				if not air[x][y][z] then
-					-- point from the rock toward whatever air is next to it
-					local normal = Vector3.zero
+					local open: Vector3? = nil
 					for _, d in DIRS do
 						if air[x + d.X][y + d.Y][z + d.Z] then
-							normal += d
+							open = d
+							break
 						end
 					end
-					if normal.Magnitude > 0 then
+					if open then
 						local p = min + Vector3.new(x - 0.5, y - 0.5, z - 0.5) * VOXEL
 						local ore = pickOre(p.Y, rng)
 						if ore then
-							normal = normal.Unit
-							-- voxel centre is 2 studs inside the rock, so move out to the surface
-							placeOre(ore, p + normal * 2, normal, rng)
+							local from = p + open * VOXEL
+							local hit = Workspace:Raycast(from, -open * VOXEL * 2, params)
+							if hit then
+								placeOre(ore, hit.Position, hit.Normal, rng)
+								Cave.placed += 1
+							else
+								Cave.skipped += 1
+							end
 						end
 					end
 				end
@@ -269,6 +285,7 @@ function Cave.preview(center: Vector3?, radius: number?): Vector3
 		local eye = spot + Vector3.new(0, 2, 0)
 		Workspace.CurrentCamera.CFrame = CFrame.lookAt(eye, eye + Vector3.new(0, 0, 10))
 	end
+	print(("cave: %d ores placed, %d skipped (no wall found)"):format(Cave.placed, Cave.skipped))
 	return spot
 end
 
@@ -276,6 +293,7 @@ function Cave.clear()
 	terrain:Clear()
 	getOreFolder():ClearAllChildren()
 	table.clear(done)
+	Cave.placed, Cave.skipped = 0, 0
 end
 
 function Cave.start()

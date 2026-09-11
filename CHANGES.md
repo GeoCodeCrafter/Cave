@@ -5,3 +5,4 @@
 - rock layers by depth (sandstone > limestone > slate > basalt) with wavy edges, rock patches, dirt floors, lava at the bottom, custom colours
 - ores were buried inside the walls, now they're clumps of chunks stuck on the wall surface poking into the tunnel. gold is foil, diamond is glass
 - kept spawning inside solid rock so you never actually saw a tunnel. findSpawn() looks for air with a floor, preview() puts the camera there and play mode spawns you there
+- ores still weren't in the tunnels. now each one raycasts from the tunnel back at the wall and sits where it hits, so it's on the real terrain surface. no hit = no ore
