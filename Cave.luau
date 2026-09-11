@@ -128,6 +128,16 @@ local function chunkKey(cx: number, cy: number, cz: number): string
 end
 
 local function keep(model: Instance, folderName: string)
+	-- a chunk reloading shouldn't put ore or decor back inside a hole somebody dug
+	if collecting and #digs > 0 and model:IsA("Model") then
+		local pos = model:GetBoundingBox().Position
+		for _, d in digs do
+			if (pos - d.at).Magnitude < d.r + 3 then
+				model:Destroy()
+				return
+			end
+		end
+	end
 	model.Parent = getFolder(folderName)
 	if collecting then
 		table.insert(collecting, model)
@@ -1240,6 +1250,35 @@ local function shatter(model: Model)
 	end
 end
 
+-- respawn = grow back later. dug-out ores don't, the rock they grew on is gone
+local function breakOre(player: Player, model: Model, respawn: boolean)
+	local def = oreDef(model:GetAttribute("Ore"))
+	if not def then
+		return
+	end
+	model:SetAttribute("Broken", true)
+	model:SetAttribute("HP", nil)
+	shatter(model)
+
+	local stats = player:FindFirstChild("leaderstats")
+	local count = stats and stats:FindFirstChild(def.name) :: IntValue?
+	if count then
+		count.Value += 1
+	end
+
+	if not respawn then
+		model:Destroy()
+		return
+	end
+	setVisible(model, false)
+	task.delay(def.respawn, function()
+		if model.Parent then
+			setVisible(model, true)
+			model:SetAttribute("Broken", nil)
+		end
+	end)
+end
+
 local function onMine(player: Player, model: Model)
 	local def = oreDef(model:GetAttribute("Ore"))
 	if not def or model:GetAttribute("Broken") then
@@ -1259,23 +1298,7 @@ local function onMine(player: Player, model: Model)
 		return
 	end
 
-	model:SetAttribute("Broken", true)
-	model:SetAttribute("HP", nil)
-	shatter(model)
-	setVisible(model, false)
-
-	local stats = player:FindFirstChild("leaderstats")
-	local count = stats and stats:FindFirstChild(def.name) :: IntValue?
-	if count then
-		count.Value += 1
-	end
-
-	task.delay(def.respawn, function()
-		if model.Parent then
-			setVisible(model, true)
-			model:SetAttribute("Broken", nil)
-		end
-	end)
+	breakOre(player, model, true)
 end
 
 local function hook(detector: Instance)
@@ -1353,6 +1376,30 @@ local function dust(at: Vector3)
 	Debris:AddItem(puff, 1)
 end
 
+-- anything the dig took the rock out from under: ores count as mined, everything else shatters
+local function clearDugOut(player: Player, center: Vector3, radius: number)
+	local params = OverlapParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = { getOreFolder(), getFolder("Decor"), getFolder("Lanterns") }
+	local seen: { [Instance]: boolean } = {}
+	for _, part in Workspace:GetPartBoundsInRadius(center, radius, params) do
+		local model = part.Parent
+		if model and model:IsA("Model") and not seen[model] then
+			seen[model] = true
+			if model:GetAttribute("Ore") then
+				if model:GetAttribute("Broken") then
+					model:Destroy()
+				else
+					breakOre(player, model, false)
+				end
+			else
+				shatter(model)
+				model:Destroy()
+			end
+		end
+	end
+end
+
 -- the client (Dig.client.luau) sends where you're pointing, the server decides if you're allowed
 function Cave.enableDigging()
 	local remote = ReplicatedStorage:FindFirstChild("CaveDig") :: RemoteEvent?
@@ -1386,6 +1433,7 @@ function Cave.enableDigging()
 		dust(at - into)
 		terrain:FillBall(at + into, s.digRadius, Enum.Material.Air)
 		table.insert(digs, { at = at + into, r = s.digRadius })
+		clearDugOut(player, at + into, s.digRadius + 1.5)
 	end)
 
 	Players.PlayerRemoving:Connect(function(player)
