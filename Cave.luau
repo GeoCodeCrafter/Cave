@@ -6,6 +6,7 @@ local Lighting = game:GetService("Lighting")
 local Debris = game:GetService("Debris")
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local DataStoreService = game:GetService("DataStoreService")
 
 local terrain = Workspace.Terrain
 
@@ -1314,6 +1315,77 @@ local function hook(detector: Instance)
 	end)
 end
 
+-- ============================================================ saving ore counts
+
+local oreStore: DataStore? = nil
+local storeWarned = false
+
+local function getStore(): DataStore?
+	if oreStore then
+		return oreStore
+	end
+	local ok, result = pcall(function()
+		return DataStoreService:GetDataStore("CaveOres")
+	end)
+	if ok then
+		oreStore = result
+		return result
+	end
+	if not storeWarned then
+		storeWarned = true
+		warn("cave: can't save ore counts. publish the place and turn on Studio Access to API Services (Game Settings > Security)")
+	end
+	return nil
+end
+
+local function saveStats(player: Player)
+	-- if loading failed, saving now would overwrite their real counts with zeros
+	if not player:GetAttribute("OresLoaded") then
+		return
+	end
+	local stats = player:FindFirstChild("leaderstats")
+	local store = getStore()
+	if not stats or not store then
+		return
+	end
+	local data = {}
+	for _, v in stats:GetChildren() do
+		if v:IsA("IntValue") then
+			data[v.Name] = v.Value
+		end
+	end
+	local ok, err = pcall(function()
+		store:SetAsync("player_" .. player.UserId, data)
+	end)
+	if not ok then
+		warn("cave: couldn't save ores for", player.Name, err)
+	end
+end
+
+local function loadStats(player: Player, stats: Folder)
+	local store = getStore()
+	if not store then
+		return
+	end
+	local ok, data = pcall(function()
+		return store:GetAsync("player_" .. player.UserId)
+	end)
+	if not ok then
+		warn("cave: couldn't load ores for", player.Name, data)
+		return
+	end
+	if type(data) == "table" then
+		for name, n in data do
+			local value = stats:FindFirstChild(name)
+			-- added, not set: anything mined while this was loading still counts
+			if value and value:IsA("IntValue") and type(n) == "number" then
+				value.Value += n
+			end
+		end
+	end
+	player:SetAttribute("OresLoaded", true)
+end
+
 local function giveStats(player: Player)
 	if player:FindFirstChild("leaderstats") then
 		return
@@ -1326,6 +1398,7 @@ local function giveStats(player: Player)
 		value.Parent = stats
 	end
 	stats.Parent = player
+	task.spawn(loadStats, player, stats)
 end
 
 function Cave.enableMining()
@@ -1341,6 +1414,30 @@ function Cave.enableMining()
 	Players.PlayerAdded:Connect(giveStats)
 	Players.PlayerRemoving:Connect(function(player)
 		lastHit[player] = nil
+		saveStats(player)
+	end)
+
+	-- autosave, and save everyone if the server shuts down
+	task.spawn(function()
+		while true do
+			task.wait(60)
+			for _, player in Players:GetPlayers() do
+				task.spawn(saveStats, player)
+			end
+		end
+	end)
+	game:BindToClose(function()
+		local left = #Players:GetPlayers()
+		for _, player in Players:GetPlayers() do
+			task.spawn(function()
+				saveStats(player)
+				left -= 1
+			end)
+		end
+		local waited = 0
+		while left > 0 and waited < 20 do
+			waited += task.wait(0.2)
+		end
 	end)
 end
 

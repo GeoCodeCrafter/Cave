@@ -22,4 +22,6 @@
 - decoration in plain rock: stalactites (walk-through), stalagmites, rubble and small still water puddles. spikes and rubble take the colour of the rock around them
 - performance: nearest chunks load first, chunks far from everyone get cleared (spawn room never), digging is remembered and put back when a chunk reloads, lights further than 110 studs from every player switch off
 - digging next to ore used to leave it floating. now dug-out ore breaks and counts as mined (no regrow, its rock is gone), crystals/spikes/rubble/lanterns shatter, and reloaded chunks don't put anything back inside a dug hole
+- ore counts save with DataStore: on leaving, every 60s, and on shutdown. a failed load never saves over your real counts, and anything mined while loading gets added on top
+- readme: took the collage out, gold screenshot back on top
 - ores sit where the wall really is (blending the air/rock values) instead of the voxel edge, which was 1-3 studs behind the visible wall
