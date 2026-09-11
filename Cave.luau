@@ -27,26 +27,28 @@ Cave.settings = {
 	rampChance = 0.45, -- per node, a sloped tunnel down to the level below
 	top = 0, -- nothing generates above this y
 	-- top down, each layer starts at this y (edges get warped by noise)
+	-- band = the thin stripes running through each layer, like real sedimentary rock
 	layers = {
-		{ at = 0, material = Enum.Material.Sandstone },
-		{ at = -50, material = Enum.Material.Limestone },
-		{ at = -120, material = Enum.Material.Slate },
-		{ at = -210, material = Enum.Material.Basalt },
+		{ at = 0, material = Enum.Material.Sandstone, band = Enum.Material.Limestone },
+		{ at = -50, material = Enum.Material.Limestone, band = Enum.Material.Slate },
+		{ at = -120, material = Enum.Material.Slate, band = Enum.Material.Rock },
+		{ at = -210, material = Enum.Material.Basalt, band = Enum.Material.Slate },
 	},
+	bandThickness = 5, -- studs
 	patch = Enum.Material.Rock,
 	floor = Enum.Material.Ground,
 	lavaBelow = -280,
 	colors = {
-		[Enum.Material.Sandstone] = Color3.fromRGB(176, 142, 104),
-		[Enum.Material.Limestone] = Color3.fromRGB(158, 148, 132),
-		[Enum.Material.Slate] = Color3.fromRGB(86, 84, 90),
-		[Enum.Material.Basalt] = Color3.fromRGB(44, 41, 46),
-		[Enum.Material.Rock] = Color3.fromRGB(116, 104, 94),
-		[Enum.Material.Ground] = Color3.fromRGB(88, 70, 52),
+		[Enum.Material.Sandstone] = Color3.fromRGB(162, 136, 108),
+		[Enum.Material.Limestone] = Color3.fromRGB(148, 141, 128),
+		[Enum.Material.Slate] = Color3.fromRGB(88, 86, 92),
+		[Enum.Material.Basalt] = Color3.fromRGB(50, 47, 52),
+		[Enum.Material.Rock] = Color3.fromRGB(118, 110, 100),
+		[Enum.Material.Ground] = Color3.fromRGB(80, 66, 52),
 	},
 	radius = 2, -- chunks around each player
 	oreOffset = 2, -- studs to push ore out of the wall. roblox draws the wall further into the tunnel than the maths says, Cave.measure() tells you the real number
-	lantern = { color = Color3.fromRGB(255, 168, 88), brightness = 1.6, range = 36 },
+	lantern = { color = Color3.fromRGB(255, 206, 158), brightness = 1.6, range = 36 },
 	oreGlow = {
 		Gold = Color3.fromRGB(255, 196, 80),
 		Diamond = Color3.fromRGB(120, 235, 255),
@@ -215,13 +217,17 @@ local function materialAt(p: Vector3, isFloor: boolean): Enum.Material
 	end
 
 	local y = p.Y + math.noise(p.X * 0.012, o, p.Z * 0.012) * 24
-	local material = s.layers[1].material
-	for _, layer in s.layers do
-		if y < layer.at then
-			material = layer.material
+	local layer = s.layers[1]
+	for _, l in s.layers do
+		if y < l.at then
+			layer = l
 		end
 	end
-	return material
+	-- every third band is the stripe material. the warp above keeps the stripes wavy
+	if math.floor(y / s.bandThickness) % 3 == 0 then
+		return layer.band
+	end
+	return layer.material
 end
 
 function Cave.applyColors()
@@ -245,8 +251,8 @@ end
 function Cave.applyLighting()
 	Lighting.ClockTime = 0
 	Lighting.Brightness = 0.4
-	Lighting.Ambient = Color3.fromRGB(30, 25, 22)
-	Lighting.OutdoorAmbient = Color3.fromRGB(22, 19, 18)
+	Lighting.Ambient = Color3.fromRGB(32, 30, 29)
+	Lighting.OutdoorAmbient = Color3.fromRGB(22, 21, 21)
 	Lighting.EnvironmentDiffuseScale = 0.15
 	Lighting.EnvironmentSpecularScale = 0.5
 	Lighting.GlobalShadows = true
@@ -254,8 +260,8 @@ function Cave.applyLighting()
 	local atmosphere = getEffect("Atmosphere", "CaveAtmosphere") :: Atmosphere
 	atmosphere.Density = 0.38
 	atmosphere.Offset = 0
-	atmosphere.Color = Color3.fromRGB(60, 48, 40)
-	atmosphere.Decay = Color3.fromRGB(30, 24, 20)
+	atmosphere.Color = Color3.fromRGB(52, 48, 46)
+	atmosphere.Decay = Color3.fromRGB(26, 24, 23)
 	atmosphere.Glare = 0
 	atmosphere.Haze = 1.5
 
@@ -529,13 +535,16 @@ end
 function Cave.buildSpawnRoom(center: Vector3?): CFrame
 	local spot = Cave.preview(center, 2)
 	local floorY = spot.Y - 3
-	local size = Vector3.new(26, 12, 26)
+	local size = Vector3.new(40, 16, 40)
 	local middle = Vector3.new(spot.X, floorY + size.Y / 2, spot.Z)
 
-	terrain:FillBlock(CFrame.new(middle), size, Enum.Material.Air)
+	-- dig from a bit under the floor, otherwise the terrain smoothing creeps up over the planks.
+	-- then a flattened dome on top so it's not a shoebox
+	terrain:FillBlock(CFrame.new(middle - Vector3.new(0, 1, 0)), size + Vector3.new(0, 2, 0), Enum.Material.Air)
+	terrain:FillBall(Vector3.new(spot.X, floorY + size.Y - 4, spot.Z), size.X * 0.6, Enum.Material.Air)
 
 	-- anything generated inside the room would be floating now
-	local half = size / 2 + Vector3.one * 2
+	local half = size / 2 + Vector3.new(size.X * 0.2, size.Y, size.Z * 0.2)
 	for _, folder in { getOreFolder(), getFolder("Lanterns") } do
 		for _, model in folder:GetChildren() do
 			if model:IsA("Model") then
@@ -570,7 +579,7 @@ function Cave.buildSpawnRoom(center: Vector3?): CFrame
 	block("Floor", Vector3.new(size.X, 2, size.Z), CFrame.new(spot.X, floorY - 1, spot.Z), Enum.Material.WoodPlanks, wood)
 
 	-- four posts and beams across the ceiling, like a propped-up mine room
-	local postHeight = size.Y - 1
+	local postHeight = 12
 	for _, corner in { Vector3.new(1, 0, 1), Vector3.new(-1, 0, 1), Vector3.new(1, 0, -1), Vector3.new(-1, 0, -1) } do
 		local at = Vector3.new(spot.X + corner.X * (size.X / 2 - 1.5), floorY + postHeight / 2, spot.Z + corner.Z * (size.Z / 2 - 1.5))
 		block("Post", Vector3.new(1.2, postHeight, 1.2), CFrame.new(at), Enum.Material.Wood, wood)

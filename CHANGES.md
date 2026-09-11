@@ -14,4 +14,6 @@
 - lighting: a lantern on a chain at every tunnel junction, gold and diamond glow, dark warm ambient, haze, bloom, slight colour grade
 - mining: click ore to hit it (coal 3 hits up to diamond 12), it shakes and throws chips, breaks into bits on the last hit, goes on the leaderboard, grows back later. server checks reach and a cooldown
 - kept falling forever on play: the server teleported you before the terrain reached your computer. added a spawn room (plank floor, beams, lamp, real SpawnLocation) dug out at a junction, and players only spawn once the mine is built and streamed in. respawns you there when you die
+- spawn room was cramped, terrain smoothing crept over the floor. now 40x40 with a dome, dug out under the floor too
+- walls: thin stripes running through each rock layer, less saturated colours, lanterns and fog more neutral so it's not all one orange
 - ores sit where the wall really is (blending the air/rock values) instead of the voxel edge, which was 1-3 studs behind the visible wall

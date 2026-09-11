@@ -29,3 +29,7 @@
 ![lanterns and iron on the wall](progress/07-lanterns.png)
 
 ![gold glowing by a side tunnel](progress/08-gold.png)
+
+**09 · spawn room.** pressing play just dropped you forever, the server moved you before the terrain reached your computer. now there's a dug-out room with a real spawn pad and you only spawn once the mine's loaded. works, but it's cramped and everything's the same orange
+
+![first spawn room](progress/09-spawn-room.png)
