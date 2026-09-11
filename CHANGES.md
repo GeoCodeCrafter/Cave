@@ -11,4 +11,5 @@
 - caves were too narrow and too grid-like. wider tunnels (8), bigger chambers, nodes spread across more of the chunk, south links only 60% of the time plus some diagonals. still one connected cave in the sim, 0 sealed pockets
 - added Cave.measure() to find out where roblox actually draws the wall, run it in play mode
 - ores were still a couple of studs inside the rock, roblox draws the wall further into the tunnel than the maths. added oreOffset to push them out
+- lighting: a lantern on a chain at every tunnel junction, gold and diamond glow, dark warm ambient, haze, bloom, slight colour grade
 - ores sit where the wall really is (blending the air/rock values) instead of the voxel edge, which was 1-3 studs behind the visible wall

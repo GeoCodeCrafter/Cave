@@ -19,3 +19,7 @@
 **tunnel network.** threw out the noise blobs, they could never guarantee every cave connects. now every chunk has a node and tunnels link the nodes, so it's one connected web. way too thin and way too grid-like though
 
 ![tunnel network, first version](progress%20images/Screenshot%202026-09-11%20150537.png)
+
+**ores actually in the tunnels.** wider tunnels, and the ores get pushed 2 studs out of the wall because roblox draws the wall further in than the maths says. first time you can walk up to one. still way too dark though
+
+![ores on the tunnel walls](progress%20images/Screenshot%202026-09-11%20151150.png)

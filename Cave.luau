@@ -2,6 +2,7 @@
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
 
 local terrain = Workspace.Terrain
 
@@ -43,6 +44,11 @@ Cave.settings = {
 	},
 	radius = 2, -- chunks around each player
 	oreOffset = 2, -- studs to push ore out of the wall. roblox draws the wall further into the tunnel than the maths says, Cave.measure() tells you the real number
+	lantern = { color = Color3.fromRGB(255, 168, 88), brightness = 1.6, range = 36 },
+	oreGlow = {
+		Gold = Color3.fromRGB(255, 196, 80),
+		Diamond = Color3.fromRGB(120, 235, 255),
+	},
 	ores = {
 		{ name = "Coal", color = Color3.fromRGB(34, 34, 38), material = Enum.Material.Slate, below = 0, chance = 0.012 },
 		{ name = "Iron", color = Color3.fromRGB(196, 132, 90), material = Enum.Material.Rock, below = -60, chance = 0.008 },
@@ -56,14 +62,18 @@ local featureCache: { [string]: any } = {}
 
 Cave.placed = 0
 
-local function getOreFolder(): Folder
-	local folder = Workspace:FindFirstChild("Ores")
+local function getFolder(name: string): Folder
+	local folder = Workspace:FindFirstChild(name)
 	if not folder then
 		folder = Instance.new("Folder")
-		folder.Name = "Ores"
+		folder.Name = name
 		folder.Parent = Workspace
 	end
 	return folder :: Folder
+end
+
+local function getOreFolder(): Folder
+	return getFolder("Ores")
 end
 
 -- ============================================================ the tunnel network
@@ -215,6 +225,46 @@ function Cave.applyColors()
 	end
 end
 
+local function getEffect(class: string, name: string): Instance
+	local existing = Lighting:FindFirstChild(name)
+	if existing then
+		return existing
+	end
+	local effect = Instance.new(class)
+	effect.Name = name
+	effect.Parent = Lighting
+	return effect
+end
+
+-- dark and warm underground, a bit of haze so tunnels fade out, bloom so lanterns glow
+function Cave.applyLighting()
+	Lighting.ClockTime = 0
+	Lighting.Brightness = 0.4
+	Lighting.Ambient = Color3.fromRGB(30, 25, 22)
+	Lighting.OutdoorAmbient = Color3.fromRGB(22, 19, 18)
+	Lighting.EnvironmentDiffuseScale = 0.15
+	Lighting.EnvironmentSpecularScale = 0.5
+	Lighting.GlobalShadows = true
+
+	local atmosphere = getEffect("Atmosphere", "CaveAtmosphere") :: Atmosphere
+	atmosphere.Density = 0.38
+	atmosphere.Offset = 0
+	atmosphere.Color = Color3.fromRGB(60, 48, 40)
+	atmosphere.Decay = Color3.fromRGB(30, 24, 20)
+	atmosphere.Glare = 0
+	atmosphere.Haze = 1.5
+
+	local bloom = getEffect("BloomEffect", "CaveBloom") :: BloomEffect
+	bloom.Intensity = 0.7
+	bloom.Size = 28
+	bloom.Threshold = 0.9
+
+	local grade = getEffect("ColorCorrectionEffect", "CaveColor") :: ColorCorrectionEffect
+	grade.Contrast = 0.12
+	grade.Saturation = -0.05
+	grade.TintColor = Color3.fromRGB(255, 244, 232)
+end
+
 -- ============================================================ ores
 
 local function pickOre(depth: number, rng: Random)
@@ -253,6 +303,17 @@ local function placeOre(ore, wall: Vector3, normal: Vector3, rng: Random)
 		part.Parent = model
 	end
 
+	local glow = Cave.settings.oreGlow[ore.name]
+	local first = model:FindFirstChildWhichIsA("BasePart")
+	if glow and first then
+		local light = Instance.new("PointLight")
+		light.Color = glow
+		light.Range = 12
+		light.Brightness = 1.2
+		light.Shadows = false
+		light.Parent = first
+	end
+
 	model.Parent = getOreFolder()
 end
 
@@ -269,6 +330,55 @@ local function wallBetween(rock: Vector3, open: Vector3): (Vector3, Vector3)
 		airness(wall + Vector3.zAxis * e) - airness(wall - Vector3.zAxis * e)
 	)
 	return wall, if normal.Magnitude > 0 then normal.Unit else open
+end
+
+-- a lantern hanging on a chain from the ceiling above a node. nodes are always open space
+local function placeLantern(at: Vector3)
+	local s = Cave.settings.lantern
+	local top = at
+	for _ = 1, 40 do
+		if airness(top + Vector3.new(0, 1, 0)) < 0 then
+			break
+		end
+		top += Vector3.new(0, 1, 0)
+	end
+	-- a bit higher than the node if there's room, otherwise it hangs in your face
+	local pos = if (top - at).Y > 5 then top - Vector3.new(0, 4, 0) else at
+
+	local model = Instance.new("Model")
+	model.Name = "Lantern"
+
+	local body = Instance.new("Part")
+	body.Name = "Body"
+	body.Anchored = true
+	body.CanCollide = false
+	body.Size = Vector3.new(0.9, 1.3, 0.9)
+	body.CFrame = CFrame.new(pos)
+	body.Material = Enum.Material.Neon
+	body.Color = s.color
+	body.Parent = model
+
+	local chainLength = (top - pos).Y + 1
+	if chainLength > 0.5 then
+		local chain = Instance.new("Part")
+		chain.Name = "Chain"
+		chain.Anchored = true
+		chain.CanCollide = false
+		chain.Size = Vector3.new(0.15, chainLength, 0.15)
+		chain.CFrame = CFrame.new(pos + Vector3.new(0, 0.65 + chainLength / 2 - 0.5, 0))
+		chain.Material = Enum.Material.Metal
+		chain.Color = Color3.fromRGB(40, 38, 36)
+		chain.Parent = model
+	end
+
+	local light = Instance.new("PointLight")
+	light.Color = s.color
+	light.Brightness = s.brightness
+	light.Range = s.range
+	light.Shadows = true
+	light.Parent = body
+
+	model.Parent = getFolder("Lanterns")
 end
 
 local DIRS = { Vector3.xAxis, -Vector3.xAxis, Vector3.yAxis, -Vector3.yAxis, Vector3.zAxis, -Vector3.zAxis }
@@ -320,6 +430,10 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 	end
 
 	terrain:WriteVoxels(Region3.new(min, min + Vector3.one * SIZE), VOXEL, materials, occupancy)
+
+	if hasNode(cy) then
+		placeLantern(nodeAt(cx, cy, cz))
+	end
 
 	-- ore on walls: rock voxels with air right next to them, placed on the real surface
 	local rng = Random.new(s.seed * 1e6 + cx * 7919 + cy * 104729 + cz * 1299709)
@@ -385,6 +499,7 @@ function Cave.preview(center: Vector3?, radius: number?): Vector3
 	local spot = Cave.findSpawn(center)
 	local r = radius or 2
 	Cave.applyColors()
+	Cave.applyLighting()
 	local cx, cy, cz = math.floor(spot.X / SIZE), math.floor(spot.Y / SIZE), math.floor(spot.Z / SIZE)
 	for dy = -2, 1 do
 		for dx = -r, r do
@@ -451,6 +566,7 @@ end
 function Cave.clear()
 	terrain:Clear()
 	getOreFolder():ClearAllChildren()
+	getFolder("Lanterns"):ClearAllChildren()
 	table.clear(done)
 	table.clear(featureCache)
 	Cave.placed = 0
@@ -458,6 +574,7 @@ end
 
 function Cave.start()
 	Cave.applyColors()
+	Cave.applyLighting()
 	task.spawn(function()
 		while true do
 			for _, player in Players:GetPlayers() do
