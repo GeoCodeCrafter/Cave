@@ -22,6 +22,9 @@ Cave.settings = {
 	minRadius = 5.5, -- too thin and the terrain grid breaks tunnels apart
 	chamberChance = 0.5, -- per node
 	chamberRadius = 22,
+	cavernChance = 0.07, -- per node, a huge flattened dome with rock pillars instead of a chamber
+	cavernRadius = 46,
+	cavernFlatten = 0.55, -- height compared to width
 	southChance = 0.6, -- east links are always there, south ones only sometimes, so it's less of a grid
 	diagChance = 0.25,
 	rampChance = 0.45, -- per node, a sloped tunnel down to the level below
@@ -120,8 +123,8 @@ local function featuresFor(cx: number, cy: number, cz: number)
 	end
 
 	local s = Cave.settings
-	local tunnels, chambers = {}, {}
-	local reach = s.chamberRadius * 1.3 + s.wiggle + VOXEL + s.tunnelRadius * 1.4
+	local tunnels, chambers, caverns, pillars = {}, {}, {}, {}
+	local reach = math.max(s.chamberRadius * 1.3, s.cavernRadius * 1.2) + s.wiggle + VOXEL + s.tunnelRadius * 1.4
 	local lo = Vector3.new(cx, cy, cz) * SIZE - Vector3.one * reach
 	local hi = Vector3.new(cx + 1, cy + 1, cz + 1) * SIZE + Vector3.one * reach
 
@@ -154,7 +157,24 @@ local function featuresFor(cx: number, cy: number, cz: number)
 							table.insert(tunnels, { a = a, ab = b - a, len2 = (b - a):Dot(b - a) })
 						end
 					end
-					if hash(x, y, z, 6) < s.chamberChance and touches(a, a) then
+					if hash(x, y, z, 10) < s.cavernChance then
+						if touches(a, a) then
+							local r = s.cavernRadius * (0.8 + hash(x, y, z, 11) * 0.4)
+							table.insert(caverns, { c = a, r = r, flat = s.cavernFlatten })
+							-- pillars off to the sides, never in the middle where the tunnels come in
+							for i = 1, 2 + math.floor(hash(x, y, z, 12) * 3) do
+								local angle = hash(x, y, z, 20 + i) * math.pi * 2
+								local dist = r * (0.3 + hash(x, y, z, 30 + i) * 0.3)
+								table.insert(pillars, {
+									x = a.X + math.cos(angle) * dist,
+									z = a.Z + math.sin(angle) * dist,
+									y = a.Y,
+									h = r * s.cavernFlatten + 6,
+									r = 2.5 + hash(x, y, z, 40 + i) * 3.5,
+								})
+							end
+						end
+					elseif hash(x, y, z, 6) < s.chamberChance and touches(a, a) then
 						table.insert(chambers, { c = a, r = s.chamberRadius * (0.7 + hash(x, y, z, 7) * 0.6) })
 					end
 				end
@@ -162,7 +182,7 @@ local function featuresFor(cx: number, cy: number, cz: number)
 		end
 	end
 
-	cached = { tunnels = tunnels, chambers = chambers }
+	cached = { tunnels = tunnels, chambers = chambers, caverns = caverns, pillars = pillars }
 	featureCache[key] = cached
 	return cached
 end
@@ -195,6 +215,22 @@ local function airness(p: Vector3): number
 		local v = c.r - (q - c.c).Magnitude
 		if v > best then
 			best = v
+		end
+	end
+	for _, c in f.caverns do
+		local d = q - c.c
+		local v = c.r - Vector3.new(d.X, d.Y / c.flat, d.Z).Magnitude
+		if v > best then
+			best = v
+		end
+	end
+	-- pillars put rock back, but only inside their cavern's height
+	for _, pl in f.pillars do
+		if math.abs(q.Y - pl.y) < pl.h then
+			local v = Vector2.new(q.X - pl.x, q.Z - pl.z).Magnitude - pl.r
+			if v < best then
+				best = v
+			end
 		end
 	end
 	return best
@@ -430,6 +466,22 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 		end
 	end
 
+	-- a single air voxel with rock on all six sides is a sealed pocket. pillars leave the odd one
+	-- where they meet a cavern wall, so fill them back in. edges are skipped, the neighbour's unknown
+	for x = 2, CHUNK - 1 do
+		for y = 2, CHUNK - 1 do
+			for z = 2, CHUNK - 1 do
+				if air[x][y][z]
+					and not (air[x + 1][y][z] or air[x - 1][y][z] or air[x][y + 1][z]
+						or air[x][y - 1][z] or air[x][y][z + 1] or air[x][y][z - 1])
+				then
+					air[x][y][z] = false
+					occupancy[x][y][z] = 1
+				end
+			end
+		end
+	end
+
 	for x = 1, CHUNK do
 		for y = 1, CHUNK do
 			for z = 1, CHUNK do
@@ -528,6 +580,35 @@ function Cave.preview(center: Vector3?, radius: number?): Vector3
 	end
 	print(("cave: %d ores placed"):format(Cave.placed))
 	return spot
+end
+
+-- caverns are rare, so this finds the nearest one, builds around it and (in edit mode) puts the camera inside
+function Cave.findCavern(near: Vector3?): Vector3?
+	local c = near or Vector3.zero
+	local cx0, cz0 = math.floor(c.X / SIZE), math.floor(c.Z / SIZE)
+	local topCy = math.floor(Cave.settings.top / SIZE) - 1
+	for r = 0, 12 do
+		for dx = -r, r do
+			for dz = -r, r do
+				if math.max(math.abs(dx), math.abs(dz)) == r then
+					for cy = topCy, topCy - 3, -1 do
+						local x, z = cx0 + dx, cz0 + dz
+						if hash(x, cy, z, 10) < Cave.settings.cavernChance then
+							local node = nodeAt(x, cy, z)
+							Cave.preview(node, 2)
+							if not RunService:IsRunning() then
+								Workspace.CurrentCamera.CFrame = CFrame.lookAt(node, node + Vector3.new(1, -0.2, 0.5))
+							end
+							print("cave: cavern at", node)
+							return node
+						end
+					end
+				end
+			end
+		end
+	end
+	warn("cave: no cavern found nearby, try a different seed or raise cavernChance")
+	return nil
 end
 
 -- a dug-out room with a plank floor, support beams, a lantern and a real SpawnLocation.

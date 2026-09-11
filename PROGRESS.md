@@ -33,3 +33,7 @@
 **09 · spawn room.** pressing play just dropped you forever, the server moved you before the terrain reached your computer. now there's a dug-out room with a real spawn pad and you only spawn once the mine's loaded. works, but it's cramped and everything's the same orange
 
 ![first spawn room](progress/09-spawn-room.png)
+
+**10 · bigger spawn room, striped rock.** 40x40 with a dome, dug out under the floor so the terrain stops creeping over the planks. rock has thin stripes through each layer now and the light's warm white instead of orange
+
+![bigger spawn room](progress/10-bigger-spawn.png)

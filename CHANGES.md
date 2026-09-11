@@ -16,4 +16,5 @@
 - kept falling forever on play: the server teleported you before the terrain reached your computer. added a spawn room (plank floor, beams, lamp, real SpawnLocation) dug out at a junction, and players only spawn once the mine is built and streamed in. respawns you there when you die
 - spawn room was cramped, terrain smoothing crept over the floor. now 40x40 with a dome, dug out under the floor too
 - walls: thin stripes running through each rock layer, less saturated colours, lanterns and fog more neutral so it's not all one orange
+- big caverns: 1 junction in 14 gets a huge flattened dome (75-110 studs across) with 2-4 rock pillars instead of a chamber. pillars left a few 1-voxel sealed pockets in the sim so lone air voxels get filled back in
 - ores sit where the wall really is (blending the air/rock values) instead of the voxel edge, which was 1-3 studs behind the visible wall
