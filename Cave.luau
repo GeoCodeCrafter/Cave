@@ -1603,7 +1603,8 @@ local function makePickaxe(): Tool
 	local tool = Instance.new("Tool")
 	tool.Name = "Pickaxe"
 	tool.CanBeDropped = false
-	tool.Grip = CFrame.new(0, 0, -1.5)
+	-- grip frame's +z points behind you, so the hand holds the +z end and the head sits out at -z
+	tool.Grip = CFrame.new(0, 0, 1.5)
 
 	local handle = Instance.new("Part")
 	handle.Name = "Handle"
@@ -1623,7 +1624,7 @@ local function makePickaxe(): Tool
 	head.Color = Color3.fromRGB(132, 132, 140)
 	head.CanCollide = false
 	head.Massless = true
-	head.CFrame = CFrame.new(0, 0, 1.8)
+	head.CFrame = CFrame.new(0, 0, -1.8)
 	head.Parent = tool
 
 	local weld = Instance.new("WeldConstraint")

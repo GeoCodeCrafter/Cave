@@ -49,14 +49,14 @@ UserInputService.InputEnded:Connect(function(input)
 	end
 end)
 
--- tilt the pickaxe down and back. no animation asset needed
+-- lift the pickaxe up, then bring it down fast onto whatever you're pointing at. no animation asset needed
 local function swingAnimation(t: Tool)
 	local rest = restGrip or t.Grip
-	TweenService:Create(t, TweenInfo.new(0.09, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+	TweenService:Create(t, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		Grip = rest * CFrame.Angles(math.rad(-75), 0, 0),
 	}):Play()
-	task.delay(0.1, function()
-		TweenService:Create(t, TweenInfo.new(0.16, Enum.EasingStyle.Quad), { Grip = rest }):Play()
+	task.delay(0.13, function()
+		TweenService:Create(t, TweenInfo.new(0.07, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Grip = rest }):Play()
 	end)
 end
 

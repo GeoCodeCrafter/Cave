@@ -26,4 +26,5 @@
 - readme: took the collage out, gold screenshot back on top
 - ore used to grow back straight into whoever was standing there. now it waits until the spot's clear, checking every 2 seconds
 - pickaxe: built from parts, everyone spawns with one. hold click to swing about 3 times a second, hitting ore mines it and hitting rock digs. swing is the grip tilting, no animation asset. optional hit sound in settings.hitSound
+- pickaxe was held backwards, head behind you. flipped the grip, and the swing is now a slow lift and a fast strike instead of the other way round
 - ores sit where the wall really is (blending the air/rock values) instead of the voxel edge, which was 1-3 studs behind the visible wall
