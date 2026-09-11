@@ -2,6 +2,8 @@ local Cave = require(game.ServerScriptService.Cave)
 
 Cave.settings.seed = 1
 
+-- wipe whatever preview() left in the place so there aren't two copies of every ore
+Cave.clear()
 -- build around a real tunnel first so nobody spawns inside rock
 local spot = Cave.preview(nil, 2)
 Cave.start()

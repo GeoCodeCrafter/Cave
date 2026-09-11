@@ -3,6 +3,8 @@ local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Lighting = game:GetService("Lighting")
+local Debris = game:GetService("Debris")
+local TweenService = game:GetService("TweenService")
 
 local terrain = Workspace.Terrain
 
@@ -49,12 +51,15 @@ Cave.settings = {
 		Gold = Color3.fromRGB(255, 196, 80),
 		Diamond = Color3.fromRGB(120, 235, 255),
 	},
+	-- hits = clicks to break it, respawn = seconds until it grows back
 	ores = {
-		{ name = "Coal", color = Color3.fromRGB(34, 34, 38), material = Enum.Material.Slate, below = 0, chance = 0.012 },
-		{ name = "Iron", color = Color3.fromRGB(196, 132, 90), material = Enum.Material.Rock, below = -60, chance = 0.008 },
-		{ name = "Gold", color = Color3.fromRGB(240, 190, 45), material = Enum.Material.Foil, below = -150, chance = 0.004 },
-		{ name = "Diamond", color = Color3.fromRGB(110, 235, 245), material = Enum.Material.Glass, below = -260, chance = 0.002 },
+		{ name = "Coal", color = Color3.fromRGB(34, 34, 38), material = Enum.Material.Slate, below = 0, chance = 0.012, hits = 3, respawn = 20 },
+		{ name = "Iron", color = Color3.fromRGB(196, 132, 90), material = Enum.Material.Rock, below = -60, chance = 0.008, hits = 5, respawn = 30 },
+		{ name = "Gold", color = Color3.fromRGB(240, 190, 45), material = Enum.Material.Foil, below = -150, chance = 0.004, hits = 8, respawn = 45 },
+		{ name = "Diamond", color = Color3.fromRGB(110, 235, 245), material = Enum.Material.Glass, below = -260, chance = 0.002, hits = 12, respawn = 60 },
 	},
+	mineReach = 14, -- studs
+	mineCooldown = 0.2, -- seconds between hits, stops autoclickers
 }
 
 local done: { [string]: boolean } = {}
@@ -302,6 +307,10 @@ local function placeOre(ore, wall: Vector3, normal: Vector3, rng: Random)
 		part:SetAttribute("Ore", ore.name)
 		part.Parent = model
 	end
+
+	local detector = Instance.new("ClickDetector")
+	detector.MaxActivationDistance = Cave.settings.mineReach
+	detector.Parent = model
 
 	local glow = Cave.settings.oreGlow[ore.name]
 	local first = model:FindFirstChildWhichIsA("BasePart")
@@ -572,9 +581,179 @@ function Cave.clear()
 	Cave.placed = 0
 end
 
+-- ============================================================ mining
+
+local lastHit: { [Player]: number } = {}
+local homes: { [BasePart]: CFrame } = setmetatable({}, { __mode = "k" }) :: any
+local hooked: { [ClickDetector]: boolean } = setmetatable({}, { __mode = "k" }) :: any
+
+local function oreDef(name: string?)
+	for _, ore in Cave.settings.ores do
+		if ore.name == name then
+			return ore
+		end
+	end
+	return nil
+end
+
+local function oreParts(model: Model): { BasePart }
+	local parts = {}
+	for _, child in model:GetChildren() do
+		if child:IsA("BasePart") then
+			table.insert(parts, child)
+		end
+	end
+	return parts
+end
+
+local function setVisible(model: Model, visible: boolean)
+	for _, part in oreParts(model) do
+		part.Transparency = if visible then 0 else 1
+		part.CanCollide = visible
+		part.CanQuery = visible
+		local light = part:FindFirstChildOfClass("PointLight")
+		if light then
+			light.Enabled = visible
+		end
+	end
+	local detector = model:FindFirstChildOfClass("ClickDetector")
+	if detector then
+		detector.MaxActivationDistance = if visible then Cave.settings.mineReach else 0
+	end
+end
+
+local function chips(model: Model, color: Color3)
+	local first = oreParts(model)[1]
+	if not first then
+		return
+	end
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Color = ColorSequence.new(color)
+	emitter.Size = NumberSequence.new(0.35, 0)
+	emitter.Speed = NumberRange.new(8, 14)
+	emitter.SpreadAngle = Vector2.new(70, 70)
+	emitter.Lifetime = NumberRange.new(0.3, 0.6)
+	emitter.Acceleration = Vector3.new(0, -50, 0)
+	emitter.EmissionDirection = Enum.NormalId.Front -- ores face out of the wall, so chips fly into the tunnel
+	emitter.Rate = 0
+	emitter.Parent = first
+	emitter:Emit(10)
+	Debris:AddItem(emitter, 1)
+end
+
+local function shake(model: Model)
+	for _, part in oreParts(model) do
+		local home = homes[part] or part.CFrame
+		homes[part] = home
+		local nudge = CFrame.new(math.random() * 0.3 - 0.15, math.random() * 0.3 - 0.15, math.random() * 0.3 - 0.15)
+		part.CFrame = home
+		TweenService:Create(part, TweenInfo.new(0.05, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, true), { CFrame = home * nudge }):Play()
+	end
+end
+
+-- bits of the ore fly out into the tunnel and disappear
+local function shatter(model: Model)
+	for _, part in oreParts(model) do
+		for _ = 1, 2 do
+			local bit = Instance.new("Part")
+			bit.Size = part.Size * 0.45
+			bit.CFrame = part.CFrame * CFrame.new(math.random() - 0.5, math.random() - 0.5, math.random() - 0.5)
+			bit.Color = part.Color
+			bit.Material = part.Material
+			bit.Anchored = false
+			bit.CanCollide = true
+			bit.AssemblyLinearVelocity = part.CFrame.LookVector * 12 + Vector3.new(math.random() * 8 - 4, 10, math.random() * 8 - 4)
+			bit.Parent = Workspace
+			Debris:AddItem(bit, 2)
+		end
+	end
+end
+
+local function onMine(player: Player, model: Model)
+	local def = oreDef(model:GetAttribute("Ore"))
+	if not def or model:GetAttribute("Broken") then
+		return
+	end
+	local now = os.clock()
+	if now - (lastHit[player] or 0) < Cave.settings.mineCooldown then
+		return
+	end
+	lastHit[player] = now
+
+	chips(model, def.color)
+	local hp = (model:GetAttribute("HP") or def.hits) - 1
+	if hp > 0 then
+		model:SetAttribute("HP", hp)
+		shake(model)
+		return
+	end
+
+	model:SetAttribute("Broken", true)
+	model:SetAttribute("HP", nil)
+	shatter(model)
+	setVisible(model, false)
+
+	local stats = player:FindFirstChild("leaderstats")
+	local count = stats and stats:FindFirstChild(def.name) :: IntValue?
+	if count then
+		count.Value += 1
+	end
+
+	task.delay(def.respawn, function()
+		if model.Parent then
+			setVisible(model, true)
+			model:SetAttribute("Broken", nil)
+		end
+	end)
+end
+
+local function hook(detector: Instance)
+	if not detector:IsA("ClickDetector") or hooked[detector] then
+		return
+	end
+	hooked[detector] = true
+	detector.MouseClick:Connect(function(player)
+		local model = detector.Parent
+		if model and model:IsA("Model") then
+			onMine(player, model)
+		end
+	end)
+end
+
+local function giveStats(player: Player)
+	if player:FindFirstChild("leaderstats") then
+		return
+	end
+	local stats = Instance.new("Folder")
+	stats.Name = "leaderstats"
+	for _, ore in Cave.settings.ores do
+		local value = Instance.new("IntValue")
+		value.Name = ore.name
+		value.Parent = stats
+	end
+	stats.Parent = player
+end
+
+function Cave.enableMining()
+	local folder = getOreFolder()
+	for _, d in folder:GetDescendants() do
+		hook(d)
+	end
+	folder.DescendantAdded:Connect(hook)
+
+	for _, player in Players:GetPlayers() do
+		giveStats(player)
+	end
+	Players.PlayerAdded:Connect(giveStats)
+	Players.PlayerRemoving:Connect(function(player)
+		lastHit[player] = nil
+	end)
+end
+
 function Cave.start()
 	Cave.applyColors()
 	Cave.applyLighting()
+	Cave.enableMining()
 	task.spawn(function()
 		while true do
 			for _, player in Players:GetPlayers() do
