@@ -47,7 +47,6 @@ Cave.settings = {
 local done: { [string]: boolean } = {}
 
 Cave.placed = 0
-Cave.skipped = 0 -- raycast found no wall, so no ore
 
 local function getOreFolder(): Folder
 	local folder = Workspace:FindFirstChild("Ores")
@@ -194,13 +193,9 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 	local region = Region3.new(min, min + Vector3.one * CHUNK * VOXEL)
 	terrain:WriteVoxels(region, VOXEL, materials, occupancy)
 
-	-- ore on walls. pick rock voxels next to air, then stand in the air and raycast back at
-	-- the wall, so the ore sits on the surface roblox actually drew instead of where the
-	-- voxel maths thinks it is (smooth terrain doesn't put the surface on the voxel edge)
+	-- ore on walls: rock voxels with air right next to them. Cave.check() confirmed the
+	-- terrain matches this map, so no raycasting needed (raycasts miss fresh terrain in edit mode)
 	local rng = Random.new(s.seed * 1e6 + cx * 7919 + cy * 104729 + cz * 1299709)
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Include
-	params.FilterDescendantsInstances = { terrain }
 
 	for x = 2, CHUNK - 1 do
 		for y = 2, CHUNK - 1 do
@@ -217,14 +212,9 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 						local p = min + Vector3.new(x - 0.5, y - 0.5, z - 0.5) * VOXEL
 						local ore = pickOre(p.Y, rng)
 						if ore then
-							local from = p + open * VOXEL
-							local hit = Workspace:Raycast(from, -open * VOXEL * 2, params)
-							if hit then
-								placeOre(ore, hit.Position, hit.Normal, rng)
-								Cave.placed += 1
-							else
-								Cave.skipped += 1
-							end
+							-- the rock voxel's face is 2 studs out from its centre, toward the air
+							placeOre(ore, p + open * (VOXEL / 2), open, rng)
+							Cave.placed += 1
 						end
 					end
 				end
@@ -285,15 +275,51 @@ function Cave.preview(center: Vector3?, radius: number?): Vector3
 		local eye = spot + Vector3.new(0, 2, 0)
 		Workspace.CurrentCamera.CFrame = CFrame.lookAt(eye, eye + Vector3.new(0, 0, 10))
 	end
-	print(("cave: %d ores placed, %d skipped (no wall found)"):format(Cave.placed, Cave.skipped))
+	print(("cave: %d ores placed"):format(Cave.placed))
 	return spot
+end
+
+-- does the terrain roblox built match what the code thinks is rock/air?
+function Cave.check()
+	local spot = Cave.findSpawn()
+	local rng = Random.new(1)
+	local same, total = 0, 0
+	for _ = 1, 300 do
+		local p = spot + Vector3.new(rng:NextNumber(-100, 100), rng:NextNumber(-60, 30), rng:NextNumber(-100, 100))
+		if p.Y < Cave.settings.top then
+			local cell = Vector3.new(math.floor(p.X / VOXEL), math.floor(p.Y / VOXEL), math.floor(p.Z / VOXEL)) * VOXEL
+			local _, occ = terrain:ReadVoxels(Region3.new(cell, cell + Vector3.one * VOXEL), VOXEL)
+			local expectAir = airness(cell + Vector3.one * VOXEL / 2) > 0
+			local isAir = occ[1][1][1] < 0.5
+			total += 1
+			if expectAir == isAir then
+				same += 1
+			end
+		end
+	end
+	local cell = Vector3.new(math.floor(spot.X / VOXEL), math.floor(spot.Y / VOXEL), math.floor(spot.Z / VOXEL)) * VOXEL
+	local mats, occ = terrain:ReadVoxels(Region3.new(cell, cell + Vector3.one * VOXEL), VOXEL)
+	print(("cave check: terrain matches the code at %d of %d points"):format(same, total))
+	print("cave check: spawn spot", spot, "is", mats[1][1][1], "occupancy", occ[1][1][1])
+
+	local air = 0
+	for _ = 1, 1000 do
+		local p = spot + Vector3.new(rng:NextNumber(-150, 150), rng:NextNumber(-80, 20), rng:NextNumber(-150, 150))
+		if airness(p) > 0 then
+			air += 1
+		end
+	end
+	print(("cave check: about %d%% of the cave is open space"):format(air / 10))
+
+	local hit = Workspace:Raycast(spot, Vector3.new(0, -10, 0))
+	print("cave check: raycast down from spawn hit", if hit then hit.Instance:GetFullName() else "nothing")
 end
 
 function Cave.clear()
 	terrain:Clear()
 	getOreFolder():ClearAllChildren()
 	table.clear(done)
-	Cave.placed, Cave.skipped = 0, 0
+	Cave.placed = 0
 end
 
 function Cave.start()
