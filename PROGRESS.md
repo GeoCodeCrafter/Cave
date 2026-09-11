@@ -69,3 +69,11 @@
 **18 · digging through crystals.** digging used to leave ore and crystals floating in the air. now anything you dig the rock out from under breaks, ore counts as mined, the rest shatters. also chunks unload when you're far away now and your digging comes back when they reload
 
 ![digging through a crystal cave](progress/18-crystal-dig.gif)
+
+**19 · pickaxe.** you spawn with one now. hold click and it swings, hits ore to mine it and rock to dig. first version was held backwards with the head behind you. also in this stretch: ore counts save between sessions, and ore waits for you to move before growing back into you
+
+![holding the pickaxe in a mushroom cave](progress/19-pickaxe.png)
+
+**20 · chasms.** long ravines cutting down through a few layers of the mine, with sagging rope bridges wherever a tunnel comes out. the bridge ends get found by walking out from the middle until there's floor. before this i tried flooding whole tunnels with water, it looked awful, so that became little tide pools instead
+
+![rope bridges at two levels of a chasm](progress/20-chasm-bridges.png)

@@ -315,6 +315,15 @@ local function warp(p: Vector3): Vector3
 	) * s.wiggle * 2
 end
 
+-- the inverse of warp, roughly: where a point on a straight tunnel line actually ended up
+local function unwarp(target: Vector3): Vector3
+	local p = target
+	for _ = 1, 4 do
+		p = target - (warp(p) - p)
+	end
+	return p
+end
+
 -- studs of clearance: > 0 is air, < 0 is rock, 0 is the wall
 local function airness(p: Vector3): number
 	local s = Cave.settings
@@ -1416,7 +1425,108 @@ function Cave.buildSpawnRoom(center: Vector3?): CFrame
 	light.Shadows = true
 	light.Parent = block("Lamp", Vector3.new(1.2, 1.2, 1.2), CFrame.new(spot.X, floorY + postHeight - 1.2, spot.Z), Enum.Material.Neon, Cave.settings.lantern.color)
 
+	-- which way the first tunnel goes. every node links east, so that one's always there
+	local c = center or Vector3.new(0, -40, 0)
+	local nx, nz = math.floor(c.X / SIZE), math.floor(c.Z / SIZE)
+	local ny = math.min(math.floor(c.Y / SIZE), math.floor(Cave.settings.top / SIZE) - 1)
+	local node, east = nodeAt(nx, ny, nz), nodeAt(nx + 1, ny, nz)
+	local flatDir = Vector3.new(east.X - node.X, 0, east.Z - node.Z).Unit
+	local floorMid = Vector3.new(spot.X, floorY, spot.Z)
+	-- room-local frame: -z points at the first tunnel, +x is to your right
+	local base = CFrame.lookAt(floorMid, floorMid + flatDir)
+	local metal = Color3.fromRGB(62, 62, 66)
+	local darkWood = Color3.fromRGB(84, 58, 38)
+
+	-- rails and sleepers running from the pad towards the tunnel
+	for _, x in { -1.2, 1.2 } do
+		block("Rail", Vector3.new(0.25, 0.25, 15), base * CFrame.new(x, 0.25, -11.5), Enum.Material.Metal, metal)
+	end
+	for i = 0, 10 do
+		block("Sleeper", Vector3.new(3.4, 0.2, 0.5), base * CFrame.new(0, 0.1, -(4 + i * 1.5)), Enum.Material.Wood, darkWood)
+	end
+
+	-- a minecart on the rails with some coal in it
+	local cart = base * CFrame.new(0, 1.1, -13)
+	block("CartFloor", Vector3.new(3, 0.3, 4.4), cart, Enum.Material.WoodPlanks, darkWood)
+	for _, x in { -1.5, 1.5 } do
+		block("CartSide", Vector3.new(0.3, 1.8, 4.4), cart * CFrame.new(x, 0.9, 0), Enum.Material.WoodPlanks, darkWood)
+	end
+	for _, z in { -2.2, 2.2 } do
+		block("CartEnd", Vector3.new(3, 1.8, 0.3), cart * CFrame.new(0, 0.9, z), Enum.Material.WoodPlanks, darkWood)
+	end
+	for _, x in { -1.6, 1.6 } do
+		for _, z in { -1.4, 1.4 } do
+			local wheel = block("Wheel", Vector3.new(0.4, 1.2, 1.2), cart * CFrame.new(x, -0.4, z), Enum.Material.Metal, metal)
+			wheel.Shape = Enum.PartType.Cylinder
+		end
+	end
+	local coal = Cave.settings.ores[1]
+	for i = 1, 6 do
+		local lump = block("Coal", Vector3.new(0.9, 0.7, 0.9), cart * CFrame.new(((i - 1) % 3 - 1) * 0.8, 1.2 + (i > 3 and 0.4 or 0), (i > 3 and 0.8 or -0.6)) * CFrame.Angles(i, i * 2, 0), coal.material, coal.color)
+		lump.CanCollide = false
+	end
+
+	-- crates in one back corner, barrels in the other
+	local crate = Color3.fromRGB(122, 90, 58)
+	block("Crate", Vector3.new(3, 3, 3), base * CFrame.new(13, 1.5, 13), Enum.Material.WoodPlanks, crate)
+	block("Crate", Vector3.new(3, 3, 3), base * CFrame.new(13, 4.5, 13) * CFrame.Angles(0, 0.4, 0), Enum.Material.WoodPlanks, crate)
+	block("Crate", Vector3.new(2.4, 2.4, 2.4), base * CFrame.new(9.6, 1.2, 13.5) * CFrame.Angles(0, -0.3, 0), Enum.Material.WoodPlanks, crate)
+	for _, at in { Vector3.new(-13, 1.5, 13), Vector3.new(-10.3, 1.5, 13.6) } do
+		local barrel = block("Barrel", Vector3.new(3, 2.3, 2.3), base * CFrame.new(at) * CFrame.Angles(0, 0, math.pi / 2), Enum.Material.Wood, darkWood)
+		barrel.Shape = Enum.PartType.Cylinder
+	end
+
+	-- a sign on a post with the controls, facing the pad
+	block("SignPost", Vector3.new(0.4, 3.4, 0.4), base * CFrame.new(-9, 1.7, -4), Enum.Material.Wood, darkWood)
+	local sign = block("Sign", Vector3.new(6, 3.2, 0.3), base * CFrame.new(-9, 4.2, -4) * CFrame.Angles(0, -math.pi / 2, 0), Enum.Material.WoodPlanks, crate)
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 60
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.SourceSansBold
+	label.TextScaled = true
+	label.TextColor3 = Color3.fromRGB(250, 236, 205)
+	label.Text = "hold click with the pickaxe\nto mine ore and dig rock\n\nfollow the lanterns out"
+	label.Parent = gui
+	gui.Parent = sign
+
+	-- a tool rack with a spare pickaxe leaning on it
+	for _, z in { -3, -5 } do
+		block("RackPost", Vector3.new(0.3, 3, 0.3), base * CFrame.new(10, 1.5, z), Enum.Material.Wood, darkWood)
+	end
+	block("RackBar", Vector3.new(0.3, 0.3, 2.6), base * CFrame.new(10, 2.8, -4), Enum.Material.Wood, darkWood)
+	local lean = base * CFrame.new(9.4, 1.6, -4) * CFrame.Angles(0, 0, -0.35)
+	block("SpareHandle", Vector3.new(0.25, 3.4, 0.25), lean, Enum.Material.Wood, Color3.fromRGB(110, 78, 50))
+	block("SpareHead", Vector3.new(0.4, 0.45, 2.8), lean * CFrame.new(0, 1.6, 0), Enum.Material.Metal, Color3.fromRGB(132, 132, 140))
+
 	room.Parent = Workspace
+
+	-- the first tunnel: lanterns showing the way out, and a bit of easy ore so the first minute pays off
+	local rng = Random.new(Cave.settings.seed * 31 + 7)
+	for _, t in { 0.3, 0.55, 0.8 } do
+		placeLantern(unwarp(node:Lerp(east, t)))
+	end
+	local right = flatDir:Cross(Vector3.yAxis).Unit
+	for i, pick in { { t = 0.35, side = 1, ore = 1 }, { t = 0.5, side = -1, ore = 1 }, { t = 0.65, side = 1, ore = 2 } } do
+		local from = unwarp(node:Lerp(east, pick.t))
+		local dir = (right * pick.side + Vector3.new(0, -0.3, 0)).Unit
+		for s = 0.5, 24, 0.5 do
+			if airness(from + dir * s) < 0 then
+				local wall = from + dir * (s - 0.25)
+				local n = Vector3.new(
+					airness(wall + Vector3.xAxis) - airness(wall - Vector3.xAxis),
+					airness(wall + Vector3.yAxis) - airness(wall - Vector3.yAxis),
+					airness(wall + Vector3.zAxis) - airness(wall - Vector3.zAxis)
+				)
+				local normal = if n.Magnitude > 0 then n.Unit else -dir
+				placeOre(Cave.settings.ores[pick.ore], wall + normal * Cave.settings.oreOffset, normal, rng)
+				break
+			end
+		end
+	end
 
 	-- only spawn in the mine
 	for _, other in Workspace:GetDescendants() do
