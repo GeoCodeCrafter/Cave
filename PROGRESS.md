@@ -11,3 +11,7 @@
 **ore clumps.** ores are clumps now instead of single cubes, but i kept spawning inside solid rock so everything looked inside out. turns out the spawn point was just a fixed spot and it's rock most of the time
 
 ![ore clumps, inside the rock](progress%20images/Screenshot%202026-09-11%20144226.png)
+
+**tried raycasting the ores onto the walls.** 0 placed, 2080 skipped. raycasts don't see terrain you just wrote in edit mode. did at least prove the terrain matches the code 300/300, so the cave maths was fine all along
+
+![raycast attempt, no ores](progress%20images/Screenshot%202026-09-11%20145430.png)

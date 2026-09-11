@@ -9,13 +9,17 @@ local Cave = {}
 
 local VOXEL = 4
 local CHUNK = 16 -- voxels per side, so 64 studs
+local SIZE = CHUNK * VOXEL
 
 Cave.settings = {
 	seed = 1,
-	chamberScale = 0.02,
-	chamberSize = 0.28, -- higher = smaller chambers
-	tunnelScale = 0.035,
-	tunnelWidth = 0.08,
+	tunnelRadius = 5,
+	wiggle = 9, -- how far tunnels bend away from a straight line
+	bend = 0.015, -- how tight the bends are. much above 0.02 and tunnels tear into separate pockets
+	minRadius = 4, -- thinner than a voxel and the terrain grid breaks tunnels apart
+	chamberChance = 0.3, -- per node
+	chamberRadius = 15,
+	rampChance = 0.35, -- per node, a sloped tunnel down to the level below
 	top = 0, -- nothing generates above this y
 	-- top down, each layer starts at this y (edges get warped by noise)
 	layers = {
@@ -45,6 +49,7 @@ Cave.settings = {
 }
 
 local done: { [string]: boolean } = {}
+local featureCache: { [string]: any } = {}
 
 Cave.placed = 0
 
@@ -58,20 +63,118 @@ local function getOreFolder(): Folder
 	return folder :: Folder
 end
 
--- > 0 means air
+-- ============================================================ the tunnel network
+--[[
+	every chunk has one node somewhere inside it. each node gets a tunnel to the
+	node east (+x) and south (+z) of it, so every level is one connected grid.
+	some nodes also get a ramp down to the level below, and some get a chamber.
+	all the air is part of that network, so nothing can end up sealed off.
+]]
+
+local function hash(x: number, y: number, z: number, k: number): number
+	local h = (x * 374761393 + y * 668265263 + z * 1440662683 + k * 3266489917 + Cave.settings.seed * 2654435761) % 4294967296
+	h = bit32.bxor(h, bit32.rshift(h, 15))
+	h = (h * 2246822519) % 4294967296
+	h = bit32.bxor(h, bit32.rshift(h, 13))
+	return h / 4294967296
+end
+
+local function hasNode(cy: number): boolean
+	return (cy + 1) * SIZE <= Cave.settings.top
+end
+
+local function nodeAt(cx: number, cy: number, cz: number): Vector3
+	return Vector3.new(
+		cx + 0.25 + hash(cx, cy, cz, 1) * 0.5,
+		cy + 0.35 + hash(cx, cy, cz, 2) * 0.3,
+		cz + 0.25 + hash(cx, cy, cz, 3) * 0.5
+	) * SIZE
+end
+
+-- every tunnel and chamber that could reach into this chunk
+local function featuresFor(cx: number, cy: number, cz: number)
+	local key = cx .. "," .. cy .. "," .. cz
+	local cached = featureCache[key]
+	if cached then
+		return cached
+	end
+
+	local s = Cave.settings
+	local tunnels, chambers = {}, {}
+	local reach = s.chamberRadius * 1.3 + s.wiggle + VOXEL
+	local lo = Vector3.new(cx, cy, cz) * SIZE - Vector3.one * reach
+	local hi = Vector3.new(cx + 1, cy + 1, cz + 1) * SIZE + Vector3.one * reach
+
+	local function touches(a: Vector3, b: Vector3): boolean
+		local mn, mx = a:Min(b), a:Max(b)
+		return mx.X >= lo.X and mn.X <= hi.X and mx.Y >= lo.Y and mn.Y <= hi.Y and mx.Z >= lo.Z and mn.Z <= hi.Z
+	end
+
+	for x = cx - 2, cx + 1 do
+		for y = cy - 1, cy + 2 do
+			for z = cz - 2, cz + 1 do
+				if hasNode(y) then
+					local a = nodeAt(x, y, z)
+					local links = { nodeAt(x + 1, y, z), nodeAt(x, y, z + 1) }
+					if hash(x, y, z, 4) < s.rampChance and hasNode(y - 1) then
+						if hash(x, y, z, 5) < 0.5 then
+							table.insert(links, nodeAt(x + 1, y - 1, z))
+						else
+							table.insert(links, nodeAt(x, y - 1, z + 1))
+						end
+					end
+					for _, b in links do
+						if touches(a, b) then
+							table.insert(tunnels, { a = a, ab = b - a, len2 = (b - a):Dot(b - a) })
+						end
+					end
+					if hash(x, y, z, 6) < s.chamberChance and touches(a, a) then
+						table.insert(chambers, { c = a, r = s.chamberRadius * (0.7 + hash(x, y, z, 7) * 0.6) })
+					end
+				end
+			end
+		end
+	end
+
+	cached = { tunnels = tunnels, chambers = chambers }
+	featureCache[key] = cached
+	return cached
+end
+
+-- studs of clearance: > 0 is air, < 0 is rock, 0 is the wall
 local function airness(p: Vector3): number
 	local s = Cave.settings
-	local o = s.seed * 97.31
+	local f = featuresFor(math.floor(p.X / SIZE), math.floor(p.Y / SIZE), math.floor(p.Z / SIZE))
+	local o = s.seed * 17.13
 
-	local chamber = math.noise(p.X * s.chamberScale + o, p.Y * s.chamberScale * 1.6, p.Z * s.chamberScale)
+	-- bend space a bit so tunnels wander instead of running dead straight
+	local b = s.bend
+	local q = p + Vector3.new(
+		math.noise(p.X * b, p.Y * b, p.Z * b + o),
+		math.noise(p.X * b + o, p.Y * b, p.Z * b),
+		math.noise(p.X * b, p.Y * b + o, p.Z * b)
+	) * s.wiggle * 2
+	local r = math.max(s.minRadius, s.tunnelRadius * (1 + math.noise(p.X * 0.05, p.Y * 0.05, p.Z * 0.05 - o) * 0.4))
 
-	-- two noise fields both near zero = a long winding tunnel
-	local a = math.noise(p.X * s.tunnelScale, p.Y * s.tunnelScale + o, p.Z * s.tunnelScale)
-	local b = math.noise(p.X * s.tunnelScale + o, p.Y * s.tunnelScale, p.Z * s.tunnelScale - o)
-	local tunnel = s.tunnelWidth * s.tunnelWidth - (a * a + b * b)
-
-	return math.max(chamber - s.chamberSize, tunnel * 20)
+	local best = -math.huge
+	for _, t in f.tunnels do
+		local ap = q - t.a
+		local k = math.clamp(ap:Dot(t.ab) / t.len2, 0, 1)
+		local v = r - (ap - t.ab * k).Magnitude
+		if v > best then
+			best = v
+		end
+	end
+	for _, c in f.chambers do
+		local v = c.r - (q - c.c).Magnitude
+		if v > best then
+			best = v
+		end
+	end
+	return best
 end
+
+-- ============================================================ materials
 
 local function materialAt(p: Vector3, isFloor: boolean): Enum.Material
 	local s = Cave.settings
@@ -103,6 +206,8 @@ function Cave.applyColors()
 	end
 end
 
+-- ============================================================ ores
+
 local function pickOre(depth: number, rng: Random)
 	for i = #Cave.settings.ores, 1, -1 do
 		local ore = Cave.settings.ores[i]
@@ -123,15 +228,13 @@ local function placeOre(ore, wall: Vector3, normal: Vector3, rng: Random)
 	local side = normal:Cross(if math.abs(normal.Y) < 0.9 then Vector3.yAxis else Vector3.xAxis).Unit
 	local up = normal:Cross(side)
 
-	for i = 1, rng:NextInteger(3, 6) do
+	for _ = 1, rng:NextInteger(3, 6) do
 		local part = Instance.new(if rng:NextNumber() < 0.4 then "WedgePart" else "Part")
 		part.Name = ore.name
 		part.Anchored = true
-		part.CanCollide = true
 		part.Size = Vector3.new(rng:NextNumber(0.8, 2.2), rng:NextNumber(0.8, 2.6), rng:NextNumber(0.8, 2.2))
 		local offset = side * rng:NextNumber(-1.5, 1.5) + up * rng:NextNumber(-1.5, 1.5)
-		local out = normal * rng:NextNumber(-0.2, 0.8)
-		local pos = wall + offset + out
+		local pos = wall + offset + normal * rng:NextNumber(0, 0.8)
 		-- lookAt breaks if you look straight along its up vector, so floors/ceilings need a different one
 		part.CFrame = CFrame.lookAt(pos, pos + normal, if math.abs(normal.Y) > 0.9 then Vector3.xAxis else Vector3.yAxis)
 			* CFrame.Angles(rng:NextNumber(-0.6, 0.6), rng:NextNumber(-0.6, 0.6), rng:NextNumber(0, 6.28))
@@ -144,7 +247,24 @@ local function placeOre(ore, wall: Vector3, normal: Vector3, rng: Random)
 	model.Parent = getOreFolder()
 end
 
+-- where the wall actually is between a rock point and an air point, and which way it faces
+local function wallBetween(rock: Vector3, open: Vector3): (Vector3, Vector3)
+	local a, b = airness(rock), airness(rock + open * VOXEL)
+	local t = math.clamp(a / (a - b), 0, 1)
+	local wall = rock + open * VOXEL * t
+
+	local e = 1
+	local normal = Vector3.new(
+		airness(wall + Vector3.xAxis * e) - airness(wall - Vector3.xAxis * e),
+		airness(wall + Vector3.yAxis * e) - airness(wall - Vector3.yAxis * e),
+		airness(wall + Vector3.zAxis * e) - airness(wall - Vector3.zAxis * e)
+	)
+	return wall, if normal.Magnitude > 0 then normal.Unit else open
+end
+
 local DIRS = { Vector3.xAxis, -Vector3.xAxis, Vector3.yAxis, -Vector3.yAxis, Vector3.zAxis, -Vector3.zAxis }
+
+-- ============================================================ chunks
 
 function Cave.generateChunk(cx: number, cy: number, cz: number)
 	local key = cx .. "," .. cy .. "," .. cz
@@ -154,7 +274,7 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 	done[key] = true
 
 	local s = Cave.settings
-	local min = Vector3.new(cx, cy, cz) * CHUNK * VOXEL
+	local min = Vector3.new(cx, cy, cz) * SIZE
 	if min.Y >= s.top then
 		return
 	end
@@ -169,7 +289,7 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 			materials[x][y], occupancy[x][y], air[x][y] = {}, {}, {}
 			for z = 1, CHUNK do
 				local p = min + Vector3.new(x - 0.5, y - 0.5, z - 0.5) * VOXEL
-				local occ = math.clamp(0.5 - airness(p) * 6, 0, 1)
+				local occ = math.clamp(0.5 - airness(p) / VOXEL, 0, 1)
 				air[x][y][z] = occ < 0.5
 				occupancy[x][y][z] = occ
 			end
@@ -190,13 +310,10 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 		end
 	end
 
-	local region = Region3.new(min, min + Vector3.one * CHUNK * VOXEL)
-	terrain:WriteVoxels(region, VOXEL, materials, occupancy)
+	terrain:WriteVoxels(Region3.new(min, min + Vector3.one * SIZE), VOXEL, materials, occupancy)
 
-	-- ore on walls: rock voxels with air right next to them. Cave.check() confirmed the
-	-- terrain matches this map, so no raycasting needed (raycasts miss fresh terrain in edit mode)
+	-- ore on walls: rock voxels with air right next to them, placed on the real surface
 	local rng = Random.new(s.seed * 1e6 + cx * 7919 + cy * 104729 + cz * 1299709)
-
 	for x = 2, CHUNK - 1 do
 		for y = 2, CHUNK - 1 do
 			for z = 2, CHUNK - 1 do
@@ -212,8 +329,8 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 						local p = min + Vector3.new(x - 0.5, y - 0.5, z - 0.5) * VOXEL
 						local ore = pickOre(p.Y, rng)
 						if ore then
-							-- the rock voxel's face is 2 studs out from its centre, toward the air
-							placeOre(ore, p + open * (VOXEL / 2), open, rng)
+							local wall, normal = wallBetween(p, open)
+							placeOre(ore, wall, normal, rng)
 							Cave.placed += 1
 						end
 					end
@@ -224,9 +341,8 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 end
 
 function Cave.around(pos: Vector3)
-	local size = CHUNK * VOXEL
 	local r = Cave.settings.radius
-	local cx, cy, cz = math.floor(pos.X / size), math.floor(pos.Y / size), math.floor(pos.Z / size)
+	local cx, cy, cz = math.floor(pos.X / SIZE), math.floor(pos.Y / SIZE), math.floor(pos.Z / SIZE)
 	for dy = -1, 1 do
 		for dx = -r, r do
 			for dz = -r, r do
@@ -237,33 +353,30 @@ function Cave.around(pos: Vector3)
 	end
 end
 
--- somewhere in a tunnel: air here and above, solid floor underneath
+-- ============================================================ helpers
+
+-- the node in the chunk you asked about is always inside a tunnel, so start there
 function Cave.findSpawn(near: Vector3?): Vector3
 	local c = near or Vector3.new(0, -40, 0)
-	local up, down = Vector3.new(0, 4, 0), Vector3.new(0, -6, 0)
-	for r = 0, 240, 8 do
-		for i = 0, 15 do
-			local angle = i / 16 * math.pi * 2
-			local x, z = c.X + math.cos(angle) * r, c.Z + math.sin(angle) * r
-			for y = math.min(c.Y, -12), c.Y - 160, -4 do
-				local p = Vector3.new(x, y, z)
-				if airness(p) > 0.05 and airness(p + up) > 0.05 and airness(p + down) < -0.05 then
-					return p
-				end
-			end
+	local cy = math.min(math.floor(c.Y / SIZE), math.floor(Cave.settings.top / SIZE) - 1)
+	local node = nodeAt(math.floor(c.X / SIZE), cy, math.floor(c.Z / SIZE))
+	-- drop to the floor
+	local p = node
+	for _ = 1, 20 do
+		if airness(p - Vector3.new(0, 2, 0)) < 0 then
+			break
 		end
+		p -= Vector3.new(0, 2, 0)
 	end
-	warn("Cave.findSpawn found no tunnel, using", c)
-	return c
+	return p + Vector3.new(0, 3, 0)
 end
 
 -- for looking at it in edit mode, run from the command bar. puts the camera in a tunnel
 function Cave.preview(center: Vector3?, radius: number?): Vector3
-	local size = CHUNK * VOXEL
 	local spot = Cave.findSpawn(center)
-	local r = radius or 3
+	local r = radius or 2
 	Cave.applyColors()
-	local cx, cy, cz = math.floor(spot.X / size), math.floor(spot.Y / size), math.floor(spot.Z / size)
+	local cx, cy, cz = math.floor(spot.X / SIZE), math.floor(spot.Y / SIZE), math.floor(spot.Z / SIZE)
 	for dy = -2, 1 do
 		for dx = -r, r do
 			for dz = -r, r do
@@ -272,8 +385,7 @@ function Cave.preview(center: Vector3?, radius: number?): Vector3
 		end
 	end
 	if not RunService:IsRunning() then
-		local eye = spot + Vector3.new(0, 2, 0)
-		Workspace.CurrentCamera.CFrame = CFrame.lookAt(eye, eye + Vector3.new(0, 0, 10))
+		Workspace.CurrentCamera.CFrame = CFrame.lookAt(spot, spot + Vector3.new(1, 0, 0))
 	end
 	print(("cave: %d ores placed"):format(Cave.placed))
 	return spot
@@ -289,36 +401,20 @@ function Cave.check()
 		if p.Y < Cave.settings.top then
 			local cell = Vector3.new(math.floor(p.X / VOXEL), math.floor(p.Y / VOXEL), math.floor(p.Z / VOXEL)) * VOXEL
 			local _, occ = terrain:ReadVoxels(Region3.new(cell, cell + Vector3.one * VOXEL), VOXEL)
-			local expectAir = airness(cell + Vector3.one * VOXEL / 2) > 0
-			local isAir = occ[1][1][1] < 0.5
 			total += 1
-			if expectAir == isAir then
+			if (airness(cell + Vector3.one * VOXEL / 2) > 0) == (occ[1][1][1] < 0.5) then
 				same += 1
 			end
 		end
 	end
-	local cell = Vector3.new(math.floor(spot.X / VOXEL), math.floor(spot.Y / VOXEL), math.floor(spot.Z / VOXEL)) * VOXEL
-	local mats, occ = terrain:ReadVoxels(Region3.new(cell, cell + Vector3.one * VOXEL), VOXEL)
 	print(("cave check: terrain matches the code at %d of %d points"):format(same, total))
-	print("cave check: spawn spot", spot, "is", mats[1][1][1], "occupancy", occ[1][1][1])
-
-	local air = 0
-	for _ = 1, 1000 do
-		local p = spot + Vector3.new(rng:NextNumber(-150, 150), rng:NextNumber(-80, 20), rng:NextNumber(-150, 150))
-		if airness(p) > 0 then
-			air += 1
-		end
-	end
-	print(("cave check: about %d%% of the cave is open space"):format(air / 10))
-
-	local hit = Workspace:Raycast(spot, Vector3.new(0, -10, 0))
-	print("cave check: raycast down from spawn hit", if hit then hit.Instance:GetFullName() else "nothing")
 end
 
 function Cave.clear()
 	terrain:Clear()
 	getOreFolder():ClearAllChildren()
 	table.clear(done)
+	table.clear(featureCache)
 	Cave.placed = 0
 end
 
