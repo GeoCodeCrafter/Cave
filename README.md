@@ -14,7 +14,7 @@ procedural mines for roblox. tunnels generate around you as you explore, every c
 
 1. put `Cave.luau` in ServerScriptService as a ModuleScript called `Cave`
 2. put `Test.server.luau` next to it as a Script. it builds the area around a tunnel and spawns you in it
-3. put `Dig.client.luau` in StarterPlayerScripts as a LocalScript, that's what lets you dig
+3. put `Dig.client.luau` in StarterPlayerScripts as a LocalScript. it's the pickaxe: equip it and hold click to mine ore and dig rock
 4. set `Lighting.Technology` to Future (scripts can't change it)
 5. to keep ore counts between sessions, publish the place and turn on Studio Access to API Services (Game Settings → Security)
 

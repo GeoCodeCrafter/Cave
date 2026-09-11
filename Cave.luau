@@ -95,6 +95,8 @@ Cave.settings = {
 	digRadius = 3.5, -- studs, size of each bite when you hold click on rock
 	digReach = 16,
 	digCooldown = 0.12,
+	-- a sound id like "rbxassetid://1234567890" played on every pickaxe hit. empty = no sound
+	hitSound = "",
 }
 
 local done: { [string]: boolean } = {}
@@ -1520,39 +1522,74 @@ local function clearDugOut(player: Player, center: Vector3, radius: number)
 end
 
 -- the client (Dig.client.luau) sends where you're pointing, the server decides if you're allowed
+local function digAt(player: Player, at: Vector3)
+	local s = Cave.settings
+	local now = os.clock()
+	if now - (lastDig[player] or 0) < s.digCooldown then
+		return
+	end
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not root or (root.Position - at).Magnitude > s.digReach then
+		return
+	end
+	if at.Y > s.top - 2 then
+		return
+	end
+	lastDig[player] = now
+
+	-- aim the bite a little into the wall, not centred on the surface
+	local into = (at - root.Position).Unit
+	dust(at - into)
+	terrain:FillBall(at + into, s.digRadius, Enum.Material.Air)
+	table.insert(digs, { at = at + into, r = s.digRadius })
+	clearDugOut(player, at + into, s.digRadius + 1.5)
+end
+
+local function hitSound(at: Vector3)
+	local id = Cave.settings.hitSound
+	if id == "" then
+		return
+	end
+	local spot = Instance.new("Attachment")
+	spot.WorldPosition = at
+	spot.Parent = terrain
+	local sound = Instance.new("Sound")
+	sound.SoundId = id
+	sound.Volume = 0.6
+	sound.PlaybackSpeed = 0.9 + math.random() * 0.2
+	sound.Parent = spot
+	sound:Play()
+	Debris:AddItem(spot, 2)
+end
+
+-- the pickaxe (Dig.client.luau) sends what it hit, the server decides if you're allowed
 function Cave.enableDigging()
-	local remote = ReplicatedStorage:FindFirstChild("CaveDig") :: RemoteEvent?
+	local remote = ReplicatedStorage:FindFirstChild("CaveSwing") :: RemoteEvent?
 	if not remote then
 		local created = Instance.new("RemoteEvent")
-		created.Name = "CaveDig"
+		created.Name = "CaveSwing"
 		created.Parent = ReplicatedStorage
 		remote = created
 	end
 
-	(remote :: RemoteEvent).OnServerEvent:Connect(function(player, at)
-		if typeof(at) ~= "Vector3" then
-			return
-		end
-		local s = Cave.settings
-		local now = os.clock()
-		if now - (lastDig[player] or 0) < s.digCooldown then
+	(remote :: RemoteEvent).OnServerEvent:Connect(function(player, target, at)
+		if typeof(at) ~= "Vector3" or typeof(target) ~= "Instance" then
 			return
 		end
 		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
-		if not root or (root.Position - at).Magnitude > s.digReach then
+		if not root or (root.Position - at).Magnitude > Cave.settings.digReach then
 			return
 		end
-		if at.Y > s.top - 2 then
-			return
+		if target == terrain then
+			digAt(player, at)
+			hitSound(at)
+		elseif target:IsA("BasePart") and target:IsDescendantOf(getOreFolder()) then
+			local model = target.Parent
+			if model and model:IsA("Model") then
+				onMine(player, model)
+				hitSound(at)
+			end
 		end
-		lastDig[player] = now
-
-		-- aim the bite a little into the wall, not centred on the surface
-		local into = (at - root.Position).Unit
-		dust(at - into)
-		terrain:FillBall(at + into, s.digRadius, Enum.Material.Air)
-		table.insert(digs, { at = at + into, r = s.digRadius })
-		clearDugOut(player, at + into, s.digRadius + 1.5)
 	end)
 
 	Players.PlayerRemoving:Connect(function(player)
@@ -1560,11 +1597,64 @@ function Cave.enableDigging()
 	end)
 end
 
+-- ============================================================ pickaxe
+
+local function makePickaxe(): Tool
+	local tool = Instance.new("Tool")
+	tool.Name = "Pickaxe"
+	tool.CanBeDropped = false
+	tool.Grip = CFrame.new(0, 0, -1.5)
+
+	local handle = Instance.new("Part")
+	handle.Name = "Handle"
+	handle.Size = Vector3.new(0.3, 0.3, 4)
+	handle.Material = Enum.Material.Wood
+	handle.Color = Color3.fromRGB(110, 78, 50)
+	handle.CanCollide = false
+	handle.Massless = true
+	handle.CFrame = CFrame.new()
+	handle.Parent = tool
+
+	-- the head sits across the far end of the handle
+	local head = Instance.new("Part")
+	head.Name = "Head"
+	head.Size = Vector3.new(0.45, 3.2, 0.5)
+	head.Material = Enum.Material.Metal
+	head.Color = Color3.fromRGB(132, 132, 140)
+	head.CanCollide = false
+	head.Massless = true
+	head.CFrame = CFrame.new(0, 0, 1.8)
+	head.Parent = tool
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = handle
+	weld.Part1 = head
+	weld.Parent = head
+
+	return tool
+end
+
+-- everyone gets a pickaxe, including after they respawn
+function Cave.enablePickaxe()
+	local StarterPack = game:GetService("StarterPack")
+	if not StarterPack:FindFirstChild("Pickaxe") then
+		makePickaxe().Parent = StarterPack
+	end
+	for _, player in Players:GetPlayers() do
+		local backpack = player:FindFirstChildOfClass("Backpack")
+		local holding = player.Character and player.Character:FindFirstChild("Pickaxe")
+		if backpack and not backpack:FindFirstChild("Pickaxe") and not holding then
+			makePickaxe().Parent = backpack
+		end
+	end
+end
+
 function Cave.start()
 	Cave.applyColors()
 	Cave.applyLighting()
 	Cave.enableMining()
 	Cave.enableDigging()
+	Cave.enablePickaxe()
 
 	task.spawn(function()
 		while true do
