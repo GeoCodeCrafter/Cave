@@ -5,6 +5,7 @@ procedural mines for roblox. tunnels generate around you as you explore, every c
 ![gold glowing next to a side tunnel](progress/08-gold.png)
 
 - terrain tunnels, chambers and the odd huge cavern with rock pillars, all one connected network so there's never a sealed-off pocket
+- deep chasms through several layers with rope bridges across wherever a tunnel comes out
 - rock changes with depth: sandstone, limestone, slate, basalt, then lava at the bottom. thin stripes through each layer
 - biomes: plain rock with lanterns, crystal caves full of glowing neon crystals, mushroom caves, and caves full of little tide pools
 - stalactites, stalagmites, rubble and little puddles in the plain rock bits

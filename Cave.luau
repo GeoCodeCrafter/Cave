@@ -27,6 +27,12 @@ Cave.settings = {
 	cavernChance = 0.07, -- per node, a huge flattened dome with rock pillars instead of a chamber
 	cavernRadius = 46,
 	cavernFlatten = 0.55, -- height compared to width
+	-- chasms: long deep ravines through several layers, with rope bridges where tunnels meet them
+	chasmCell = 320, -- studs, at most one chasm per cell this size
+	chasmChance = 0.45,
+	chasmLength = 220,
+	chasmDepth = 170,
+	chasmWidth = 30, -- across the top, narrows towards the bottom
 	southChance = 0.6, -- east links are always there, south ones only sometimes, so it's less of a grid
 	diagChance = 0.25,
 	rampChance = 0.45, -- per node, a sloped tunnel down to the level below
@@ -112,6 +118,7 @@ local done: { [string]: boolean } = {}
 local featureCache: { [string]: any } = {}
 
 Cave.placed = 0
+Cave.bridges = 0
 
 local function getFolder(name: string): Folder
 	local folder = Workspace:FindFirstChild(name)
@@ -257,9 +264,55 @@ local function featuresFor(cx: number, cy: number, cz: number)
 		end
 	end
 
-	cached = { tunnels = tunnels, chambers = chambers, caverns = caverns, pillars = pillars }
+	-- chasms live on a much bigger grid than the chunks
+	local chasms = {}
+	local cell = s.chasmCell
+	for gx = math.floor(lo.X / cell) - 1, math.floor(hi.X / cell) + 1 do
+		for gz = math.floor(lo.Z / cell) - 1, math.floor(hi.Z / cell) + 1 do
+			if hash(gx, 7777, gz, 50) < s.chasmChance then
+				local center = Vector2.new((gx + 0.2 + hash(gx, 7777, gz, 51) * 0.6) * cell, (gz + 0.2 + hash(gx, 7777, gz, 52) * 0.6) * cell)
+				local angle = hash(gx, 7777, gz, 53) * math.pi
+				local len = s.chasmLength * (0.7 + hash(gx, 7777, gz, 54) * 0.5)
+				local dir = Vector2.new(math.cos(angle), math.sin(angle))
+				local a = center - dir * len / 2
+				local top = s.top - 14 - hash(gx, 7777, gz, 55) * 20
+				local bottom = top - s.chasmDepth * (0.75 + hash(gx, 7777, gz, 56) * 0.5)
+				local halfTop = s.chasmWidth * (0.8 + hash(gx, 7777, gz, 57) * 0.4) / 2
+				local pad = halfTop + s.wiggle * 1.5
+				local b = a + dir * len
+				local inX = math.max(a.X, b.X) + pad >= lo.X and math.min(a.X, b.X) - pad <= hi.X
+				local inZ = math.max(a.Y, b.Y) + pad >= lo.Z and math.min(a.Y, b.Y) - pad <= hi.Z
+				local inY = top + pad >= lo.Y and bottom - pad <= hi.Y
+				if inX and inZ and inY then
+					table.insert(chasms, {
+						a = a,
+						ab = dir * len,
+						len2 = len * len,
+						top = top,
+						bottom = bottom,
+						halfTop = halfTop,
+						halfBottom = halfTop * 0.35,
+					})
+				end
+			end
+		end
+	end
+
+	cached = { tunnels = tunnels, chambers = chambers, caverns = caverns, pillars = pillars, chasms = chasms }
 	featureCache[key] = cached
 	return cached
+end
+
+-- bend space a bit so tunnels wander instead of running dead straight
+local function warp(p: Vector3): Vector3
+	local s = Cave.settings
+	local o = s.seed * 17.13
+	local b = s.bend
+	return p + Vector3.new(
+		math.noise(p.X * b, p.Y * b, p.Z * b + o),
+		math.noise(p.X * b + o, p.Y * b, p.Z * b),
+		math.noise(p.X * b, p.Y * b + o, p.Z * b)
+	) * s.wiggle * 2
 end
 
 -- studs of clearance: > 0 is air, < 0 is rock, 0 is the wall
@@ -267,14 +320,7 @@ local function airness(p: Vector3): number
 	local s = Cave.settings
 	local f = featuresFor(math.floor(p.X / SIZE), math.floor(p.Y / SIZE), math.floor(p.Z / SIZE))
 	local o = s.seed * 17.13
-
-	-- bend space a bit so tunnels wander instead of running dead straight
-	local b = s.bend
-	local q = p + Vector3.new(
-		math.noise(p.X * b, p.Y * b, p.Z * b + o),
-		math.noise(p.X * b + o, p.Y * b, p.Z * b),
-		math.noise(p.X * b, p.Y * b + o, p.Z * b)
-	) * s.wiggle * 2
+	local q = warp(p)
 	local r = math.max(s.minRadius, s.tunnelRadius * (1 + math.noise(p.X * 0.05, p.Y * 0.05, p.Z * 0.05 - o) * 0.4))
 
 	local best = -math.huge
@@ -297,6 +343,20 @@ local function airness(p: Vector3): number
 		local v = c.r - Vector3.new(d.X, d.Y / c.flat, d.Z).Magnitude
 		if v > best then
 			best = v
+		end
+	end
+	for _, c in f.chasms do
+		if q.Y < c.top and q.Y > c.bottom then
+			local t = (c.top - q.Y) / (c.top - c.bottom) -- 0 at the top, 1 at the bottom
+			local half = c.halfTop * (1 - t) + c.halfBottom * t
+			local ap = Vector2.new(q.X - c.a.X, q.Z - c.a.Y)
+			local k = math.clamp(ap:Dot(c.ab) / c.len2, 0, 1)
+			local v = half - (ap - c.ab * k).Magnitude
+			-- round off the top and bottom so it doesn't end in a flat slab
+			v = math.min(v, (c.top - q.Y) * 0.5, (q.Y - c.bottom) * 0.5)
+			if v > best then
+				best = v
+			end
 		end
 	end
 	-- pillars put rock back, but only inside their cavern's height
@@ -784,6 +844,89 @@ local function placeLantern(at: Vector3)
 	keep(model, "Lanterns")
 end
 
+-- a sagging plank bridge across a chasm. walks out from the middle both ways until it finds
+-- floor, so the ends land on the real tunnel floor rather than a guess
+local function placeBridge(center: Vector3, dir: Vector3)
+	local function edge(sign: number): Vector3?
+		for step = 2, 80 do
+			local p = center + dir * (sign * step)
+			for drop = 0, 14, 2 do
+				local below = p - Vector3.new(0, drop, 0)
+				if airness(below) < 0 then
+					return below
+				end
+			end
+		end
+		return nil
+	end
+	local e1, e2 = edge(-1), edge(1)
+	if not e1 or not e2 then
+		return
+	end
+	local a = e1 - dir * 2 + Vector3.new(0, 0.3, 0)
+	local b = e2 + dir * 2 + Vector3.new(0, 0.3, 0)
+	local flat = Vector3.new(b.X - a.X, 0, b.Z - a.Z)
+	local length = flat.Magnitude
+	if length < 8 or length > 120 then
+		return
+	end
+
+	local model = Instance.new("Model")
+	model.Name = "Bridge"
+	local right = dir:Cross(Vector3.yAxis).Unit
+	local sagDepth = math.min(3, length * 0.04)
+	local function along(t: number): Vector3
+		return a:Lerp(b, t) - Vector3.new(0, math.sin(t * math.pi) * sagDepth, 0)
+	end
+
+	local function part(name: string, size: Vector3, cframe: CFrame, material: Enum.Material, color: Color3)
+		local p = Instance.new("Part")
+		p.Name = name
+		p.Anchored = true
+		p.Size = size
+		p.CFrame = cframe
+		p.Material = material
+		p.Color = color
+		p.Parent = model
+		return p
+	end
+
+	local planks = math.max(2, math.floor(length / 1.3))
+	for i = 0, planks do
+		local pos = along(i / planks)
+		local shade = Color3.fromRGB(104, 74, 48):Lerp(Color3.fromRGB(80, 56, 36), (i * 37 % 10) / 10)
+		part("Plank", Vector3.new(5, 0.3, 1.1), CFrame.lookAt(pos, pos + dir), Enum.Material.WoodPlanks, shade)
+	end
+
+	-- rope rails, as short straight pieces so they follow the sag
+	local rope = Color3.fromRGB(150, 128, 92)
+	for _, side in { -1, 1 } do
+		local prev: Vector3? = nil
+		for i = 0, planks, 2 do
+			local p = along(i / planks) + right * side * 2.4 + Vector3.new(0, 2.6, 0)
+			if prev then
+				local mid = (prev + p) / 2
+				part("Rope", Vector3.new(0.15, 0.15, (p - prev).Magnitude), CFrame.lookAt(mid, p), Enum.Material.Fabric, rope)
+			end
+			prev = p
+		end
+		for _, t in { 0, 1 } do
+			local base = along(t) + right * side * 2.4
+			part("Post", Vector3.new(0.4, 3.2, 0.4), CFrame.new(base + Vector3.new(0, 1.3, 0)), Enum.Material.Wood, Color3.fromRGB(90, 64, 42))
+		end
+	end
+
+	local lamp = part("Lamp", Vector3.new(0.7, 0.9, 0.7), CFrame.new(along(0) + right * 2.4 + Vector3.new(0, 3.3, 0)), Enum.Material.Neon, Cave.settings.lantern.color)
+	local light = Instance.new("PointLight")
+	light.Color = Cave.settings.lantern.color
+	light.Range = 22
+	light.Brightness = 1.4
+	light.Parent = lamp
+
+	keep(model, "Bridges")
+	Cave.bridges += 1
+end
+
 local DIRS = { Vector3.xAxis, -Vector3.xAxis, Vector3.yAxis, -Vector3.yAxis, Vector3.zAxis, -Vector3.zAxis }
 
 -- ============================================================ chunks
@@ -863,6 +1006,39 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 			and c.Z > min.Z - d.r and c.Z < min.Z + SIZE + d.r
 		then
 			terrain:FillBall(c, d.r, Enum.Material.Air)
+		end
+	end
+
+	-- rope bridges where a tunnel runs into a chasm. the chunk the crossing point falls in builds
+	-- it, so each bridge only gets built once
+	local f = featuresFor(cx, cy, cz)
+	for _, c in f.chasms do
+		for _, t in f.tunnels do
+			-- ramps are too steep to bridge
+			if math.abs(t.ab.Y) < 10 then
+				local dx, dz = t.ab.X, t.ab.Z
+				local ex, ez = c.ab.X, c.ab.Y
+				local denom = dx * ez - dz * ex
+				if math.abs(denom) > 1e-6 then
+					local wx, wz = c.a.X - t.a.X, c.a.Y - t.a.Z
+					local u = (wx * ez - wz * ex) / denom
+					local w = (wx * dz - wz * dx) / denom
+					if u > 0 and u < 1 and w > 0.05 and w < 0.95 then
+						local hit = t.a + t.ab * u
+						local mine = hit.X >= min.X and hit.X < min.X + SIZE
+							and hit.Y >= min.Y and hit.Y < min.Y + SIZE
+							and hit.Z >= min.Z and hit.Z < min.Z + SIZE
+						if mine and hit.Y > c.bottom + 10 and hit.Y < c.top - 6 then
+							-- the tunnel's been bent by the warp, step back to where it really runs
+							local p = hit
+							for _ = 1, 4 do
+								p = hit - (warp(p) - p)
+							end
+							placeBridge(p, Vector3.new(dx, 0, dz).Unit)
+						end
+					end
+				end
+			end
 		end
 	end
 
@@ -1071,7 +1247,7 @@ function Cave.preview(center: Vector3?, radius: number?): Vector3
 	if not RunService:IsRunning() then
 		Workspace.CurrentCamera.CFrame = CFrame.lookAt(spot, spot + Vector3.new(1, 0, 0))
 	end
-	print(("cave: %d ores placed"):format(Cave.placed))
+	print(("cave: %d ores placed, %d bridges"):format(Cave.placed, Cave.bridges))
 	return spot
 end
 
@@ -1101,6 +1277,37 @@ function Cave.findCavern(near: Vector3?): Vector3?
 		end
 	end
 	warn("cave: no cavern found nearby, try a different seed or raise cavernChance")
+	return nil
+end
+
+-- finds the nearest chasm, builds around it and (in edit mode) hangs the camera partway down it
+function Cave.findChasm(near: Vector3?): Vector3?
+	local s = Cave.settings
+	local c = near or Vector3.zero
+	local cell = s.chasmCell
+	local gx0, gz0 = math.floor(c.X / cell), math.floor(c.Z / cell)
+	for r = 0, 6 do
+		for dx = -r, r do
+			for dz = -r, r do
+				local gx, gz = gx0 + dx, gz0 + dz
+				if math.max(math.abs(dx), math.abs(dz)) == r and hash(gx, 7777, gz, 50) < s.chasmChance then
+					-- same numbers featuresFor uses for this cell
+					local center = Vector2.new((gx + 0.2 + hash(gx, 7777, gz, 51) * 0.6) * cell, (gz + 0.2 + hash(gx, 7777, gz, 52) * 0.6) * cell)
+					local angle = hash(gx, 7777, gz, 53) * math.pi
+					local top = s.top - 14 - hash(gx, 7777, gz, 55) * 20
+					local eye = Vector3.new(center.X, top - 30, center.Y)
+					Cave.preview(eye, 3)
+					if not RunService:IsRunning() then
+						local dir = Vector3.new(math.cos(angle), -0.25, math.sin(angle))
+						Workspace.CurrentCamera.CFrame = CFrame.lookAt(eye, eye + dir)
+					end
+					print("cave: chasm at", eye)
+					return eye
+				end
+			end
+		end
+	end
+	warn("cave: no chasm found nearby, raise chasmChance or try another seed")
 	return nil
 end
 
@@ -1274,6 +1481,7 @@ function Cave.clear()
 	getOreFolder():ClearAllChildren()
 	getFolder("Lanterns"):ClearAllChildren()
 	getFolder("Decor"):ClearAllChildren()
+	getFolder("Bridges"):ClearAllChildren()
 	table.clear(done)
 	table.clear(chunkObjects)
 	table.clear(chunkCoords)
@@ -1282,6 +1490,7 @@ function Cave.clear()
 	table.clear(lights)
 	table.clear(featureCache)
 	Cave.placed = 0
+	Cave.bridges = 0
 end
 
 -- ============================================================ mining
