@@ -16,9 +16,24 @@ Cave.settings = {
 	tunnelScale = 0.035,
 	tunnelWidth = 0.08,
 	top = 0, -- nothing generates above this y
-	rock = Enum.Material.Slate,
-	deepRock = Enum.Material.Basalt,
-	deepAt = -200,
+	-- top down, each layer starts at this y (edges get warped by noise)
+	layers = {
+		{ at = 0, material = Enum.Material.Sandstone },
+		{ at = -50, material = Enum.Material.Limestone },
+		{ at = -120, material = Enum.Material.Slate },
+		{ at = -210, material = Enum.Material.Basalt },
+	},
+	patch = Enum.Material.Rock,
+	floor = Enum.Material.Ground,
+	lavaBelow = -280,
+	colors = {
+		[Enum.Material.Sandstone] = Color3.fromRGB(176, 142, 104),
+		[Enum.Material.Limestone] = Color3.fromRGB(158, 148, 132),
+		[Enum.Material.Slate] = Color3.fromRGB(86, 84, 90),
+		[Enum.Material.Basalt] = Color3.fromRGB(44, 41, 46),
+		[Enum.Material.Rock] = Color3.fromRGB(116, 104, 94),
+		[Enum.Material.Ground] = Color3.fromRGB(88, 70, 52),
+	},
 	radius = 2, -- chunks around each player
 	ores = {
 		{ name = "Coal", color = Color3.fromRGB(40, 40, 45), below = 0, chance = 0.02 },
@@ -53,6 +68,36 @@ local function airness(p: Vector3): number
 	local tunnel = s.tunnelWidth * s.tunnelWidth - (a * a + b * b)
 
 	return math.max(chamber - s.chamberSize, tunnel * 20)
+end
+
+local function materialAt(p: Vector3, isFloor: boolean): Enum.Material
+	local s = Cave.settings
+	local o = s.seed * 31.7
+
+	if p.Y < s.lavaBelow and math.noise(p.X * 0.04, p.Y * 0.04 + o, p.Z * 0.04) > 0.3 then
+		return Enum.Material.CrackedLava
+	end
+	if isFloor and p.Y > s.layers[#s.layers].at then
+		return s.floor
+	end
+	if math.noise(p.X * 0.05 + o, p.Y * 0.08, p.Z * 0.05) > 0.32 then
+		return s.patch
+	end
+
+	local y = p.Y + math.noise(p.X * 0.012, o, p.Z * 0.012) * 24
+	local material = s.layers[1].material
+	for _, layer in s.layers do
+		if y < layer.at then
+			material = layer.material
+		end
+	end
+	return material
+end
+
+function Cave.applyColors()
+	for material, color in Cave.settings.colors do
+		terrain:SetMaterialColor(material, color)
+	end
 end
 
 local function pickOre(depth: number, rng: Random)
@@ -100,14 +145,23 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 			materials[x][y], occupancy[x][y], air[x][y] = {}, {}, {}
 			for z = 1, CHUNK do
 				local p = min + Vector3.new(x - 0.5, y - 0.5, z - 0.5) * VOXEL
-				local v = airness(p)
-				local occ = math.clamp(0.5 - v * 6, 0, 1)
+				local occ = math.clamp(0.5 - airness(p) * 6, 0, 1)
 				air[x][y][z] = occ < 0.5
 				occupancy[x][y][z] = occ
-				materials[x][y][z] = if occ == 0
-					then Enum.Material.Air
-					elseif p.Y < s.deepAt then s.deepRock
-					else s.rock
+			end
+		end
+	end
+
+	for x = 1, CHUNK do
+		for y = 1, CHUNK do
+			for z = 1, CHUNK do
+				if occupancy[x][y][z] == 0 then
+					materials[x][y][z] = Enum.Material.Air
+				else
+					local p = min + Vector3.new(x - 0.5, y - 0.5, z - 0.5) * VOXEL
+					local isFloor = if y < CHUNK then air[x][y + 1][z] else false
+					materials[x][y][z] = materialAt(p, isFloor)
+				end
 			end
 		end
 	end
@@ -155,6 +209,7 @@ function Cave.preview(center: Vector3?, radius: number?)
 	local size = CHUNK * VOXEL
 	local c = center or Vector3.new(0, -40, 0)
 	local r = radius or 3
+	Cave.applyColors()
 	local cx, cy, cz = math.floor(c.X / size), math.floor(c.Y / size), math.floor(c.Z / size)
 	for dy = -2, 0 do
 		for dx = -r, r do
@@ -172,6 +227,7 @@ function Cave.clear()
 end
 
 function Cave.start()
+	Cave.applyColors()
 	task.spawn(function()
 		while true do
 			for _, player in Players:GetPlayers() do
