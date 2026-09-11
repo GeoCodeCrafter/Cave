@@ -56,6 +56,13 @@ Cave.settings = {
 		[Enum.Material.Mud] = Color3.fromRGB(58, 50, 46),
 		[Enum.Material.LeafyGrass] = Color3.fromRGB(38, 72, 64),
 	},
+	-- plain rock areas only, chances per ceiling/floor voxel
+	decor = {
+		stalactiteChance = 0.05,
+		stalagmiteChance = 0.015,
+		rubbleChance = 0.03,
+		puddleChance = 0.006,
+	},
 	-- big regions of the mine. above crystalAbove = crystal caves, below mushroomBelow = mushroom caves
 	biomes = {
 		scale = 0.0035, -- smaller = bigger regions
@@ -335,6 +342,13 @@ function Cave.applyLighting()
 	Lighting.EnvironmentSpecularScale = 0.5
 	Lighting.GlobalShadows = true
 
+	-- still, dark cave water for the puddles
+	terrain.WaterColor = Color3.fromRGB(34, 64, 72)
+	terrain.WaterTransparency = 0.55
+	terrain.WaterReflectance = 0.35
+	terrain.WaterWaveSize = 0
+	terrain.WaterWaveSpeed = 0
+
 	local atmosphere = getEffect("Atmosphere", "CaveAtmosphere") :: Atmosphere
 	atmosphere.Density = 0.38
 	atmosphere.Offset = 0
@@ -518,6 +532,64 @@ local function placeMushroom(floor: Vector3, rng: Random)
 	model.Parent = getFolder("Decor")
 end
 
+-- the colour of the rock at a point, so spikes and rubble match the wall they grow out of
+local function rockColor(p: Vector3): Color3
+	local ok, color = pcall(function()
+		return terrain:GetMaterialColor(materialAt(p, false))
+	end)
+	return if ok then color else Color3.fromRGB(110, 104, 98)
+end
+
+-- stalactite (up = -y) or stalagmite (up = +y). tapering stack of blocks, each twisted a bit
+local function placeSpike(base: Vector3, up: Vector3, color: Color3, rng: Random, solid: boolean)
+	local len = rng:NextNumber(4, 10)
+	local width = rng:NextNumber(1.2, 2.4)
+	local segments = 4
+	local spin = rng:NextNumber(0, math.pi)
+	local sign = if up.Y < 0 then -1 else 1
+	local axis = CFrame.new(base) * CFrame.Angles(rng:NextNumber(-0.12, 0.12), 0, rng:NextNumber(-0.12, 0.12))
+
+	local model = Instance.new("Model")
+	model.Name = if sign < 0 then "Stalactite" else "Stalagmite"
+	for i = 0, segments - 1 do
+		local h = len / segments
+		local w = width * (1 - (i / segments) * 0.8)
+		local part = Instance.new("Part")
+		part.Anchored = true
+		part.CanCollide = solid
+		part.Material = Enum.Material.Slate
+		part.Color = color
+		part.Size = Vector3.new(w, h + 0.2, w)
+		-- starts 0.6 studs inside the rock so there's no gap where it meets the ceiling/floor
+		part.CFrame = axis * CFrame.new(0, sign * (h * i + h / 2 - 0.6), 0) * CFrame.Angles(0, spin + i * 0.5, 0)
+		part.Parent = model
+	end
+	model.Parent = getFolder("Decor")
+end
+
+local function placeRubble(floor: Vector3, color: Color3, rng: Random)
+	local model = Instance.new("Model")
+	model.Name = "Rubble"
+	for _ = 1, rng:NextInteger(2, 5) do
+		local size = Vector3.new(rng:NextNumber(0.5, 1.6), rng:NextNumber(0.4, 1.1), rng:NextNumber(0.5, 1.6))
+		local part = Instance.new("Part")
+		part.Anchored = true
+		part.CanCollide = false
+		part.Material = Enum.Material.Slate
+		part.Color = color:Lerp(Color3.new(0, 0, 0), rng:NextNumber(0, 0.25))
+		part.Size = size
+		part.CFrame = CFrame.new(floor + Vector3.new(rng:NextNumber(-2.5, 2.5), size.Y * 0.3, rng:NextNumber(-2.5, 2.5)))
+			* CFrame.Angles(rng:NextNumber(0, 6.28), rng:NextNumber(0, 6.28), rng:NextNumber(0, 6.28))
+		part.Parent = model
+	end
+	model.Parent = getFolder("Decor")
+end
+
+-- sinks a shallow disc of real terrain water into the floor
+local function placePuddle(floor: Vector3, rng: Random)
+	terrain:FillCylinder(CFrame.new(floor - Vector3.new(0, 0.8, 0)), 2, rng:NextNumber(3, 6), Enum.Material.Water)
+end
+
 -- a lantern hanging on a chain from the ceiling above a node. nodes are always open space
 local function placeLantern(at: Vector3)
 	local s = Cave.settings.lantern
@@ -670,6 +742,24 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 								local wall, normal = wallBetween(p, open)
 								if normal.Y > 0.6 then
 									placeMushroom(wall + normal * s.oreOffset, rng)
+								end
+							elseif biome == "rock" and (open == Vector3.yAxis or open == -Vector3.yAxis) then
+								local d = s.decor
+								local roll = rng:NextNumber()
+								if open == -Vector3.yAxis then
+									if roll < d.stalactiteChance then
+										local wall = wallBetween(p, open)
+										placeSpike(wall, -Vector3.yAxis, rockColor(p), rng, false)
+									end
+								elseif roll < d.stalagmiteChance then
+									local wall = wallBetween(p, open)
+									placeSpike(wall, Vector3.yAxis, rockColor(p), rng, true)
+								elseif roll < d.stalagmiteChance + d.rubbleChance then
+									local wall = wallBetween(p, open)
+									placeRubble(wall, rockColor(p), rng)
+								elseif roll < d.stalagmiteChance + d.rubbleChance + d.puddleChance then
+									local wall = wallBetween(p, open)
+									placePuddle(wall, rng)
 								end
 							end
 						end

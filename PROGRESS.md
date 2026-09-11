@@ -57,3 +57,7 @@
 **15 · digging.** hold click on rock and you carve through it, dust comes off in the rock's colour. first version wouldn't let you dig the spawn room walls, which is exactly where you try it first, so that rule's gone
 
 ![digging into the spawn room wall](progress/15-digging.gif)
+
+**16 · mushroom caves.** the other biome. mud walls, mossy floor, and glowing mushrooms that light the tunnel instead of lanterns
+
+![a glowing mushroom in a mossy tunnel](progress/16-mushroom-cave.png)

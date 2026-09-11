@@ -19,4 +19,5 @@
 - big caverns: 1 junction in 14 gets a huge flattened dome (75-110 studs across) with 2-4 rock pillars instead of a chamber. pillars left a few 1-voxel sealed pockets in the sim so lone air voxels get filled back in
 - biomes: big regions of crystal caves (basalt + violet ice walls, glowing neon crystals, pale floor) and mushroom caves (mud walls, mossy floor, glowing mushrooms). both light themselves so no lanterns there. Cave.findBiome("crystal") jumps to one
 - digging: hold click on rock to carve through it, dust in the rock's colour. server checks reach, cooldown and the top of the mine. (first version also blocked the spawn room walls, which is exactly where you test it, so that's gone) Dig.client.luau goes in StarterPlayerScripts
+- decoration in plain rock: stalactites (walk-through), stalagmites, rubble and small still water puddles. spikes and rubble take the colour of the rock around them
 - ores sit where the wall really is (blending the air/rock values) instead of the voxel edge, which was 1-3 studs behind the visible wall
