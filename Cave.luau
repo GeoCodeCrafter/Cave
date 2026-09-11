@@ -36,10 +36,10 @@ Cave.settings = {
 	},
 	radius = 2, -- chunks around each player
 	ores = {
-		{ name = "Coal", color = Color3.fromRGB(40, 40, 45), below = 0, chance = 0.02 },
-		{ name = "Iron", color = Color3.fromRGB(200, 140, 95), below = -60, chance = 0.012 },
-		{ name = "Gold", color = Color3.fromRGB(240, 195, 50), below = -150, chance = 0.006 },
-		{ name = "Diamond", color = Color3.fromRGB(95, 230, 240), below = -260, chance = 0.003 },
+		{ name = "Coal", color = Color3.fromRGB(34, 34, 38), material = Enum.Material.Slate, below = 0, chance = 0.012 },
+		{ name = "Iron", color = Color3.fromRGB(196, 132, 90), material = Enum.Material.Rock, below = -60, chance = 0.008 },
+		{ name = "Gold", color = Color3.fromRGB(240, 190, 45), material = Enum.Material.Foil, below = -150, chance = 0.004 },
+		{ name = "Diamond", color = Color3.fromRGB(110, 235, 245), material = Enum.Material.Glass, below = -260, chance = 0.002 },
 	},
 }
 
@@ -110,17 +110,36 @@ local function pickOre(depth: number, rng: Random)
 	return nil
 end
 
-local function placeOre(ore, pos: Vector3, rng: Random)
-	local part = Instance.new("Part")
-	part.Name = ore.name
-	part.Anchored = true
-	part.Size = Vector3.one * rng:NextNumber(2, 3.5)
-	part.CFrame = CFrame.new(pos) * CFrame.Angles(rng:NextNumber(0, 6), rng:NextNumber(0, 6), 0)
-	part.Color = ore.color
-	part.Material = Enum.Material.Rock
-	part:SetAttribute("Ore", ore.name)
-	part.Parent = getOreFolder()
+-- a clump of chunks stuck to the wall, poking out along the wall's normal
+local function placeOre(ore, wall: Vector3, normal: Vector3, rng: Random)
+	local model = Instance.new("Model")
+	model.Name = ore.name
+	model:SetAttribute("Ore", ore.name)
+
+	-- any two directions across the wall
+	local side = normal:Cross(if math.abs(normal.Y) < 0.9 then Vector3.yAxis else Vector3.xAxis).Unit
+	local up = normal:Cross(side)
+
+	for i = 1, rng:NextInteger(3, 6) do
+		local part = Instance.new(if rng:NextNumber() < 0.4 then "WedgePart" else "Part")
+		part.Name = ore.name
+		part.Anchored = true
+		part.CanCollide = true
+		part.Size = Vector3.new(rng:NextNumber(0.8, 2.2), rng:NextNumber(0.8, 2.6), rng:NextNumber(0.8, 2.2))
+		local offset = side * rng:NextNumber(-1.8, 1.8) + up * rng:NextNumber(-1.8, 1.8)
+		local out = normal * rng:NextNumber(0, 1.2)
+		part.CFrame = CFrame.lookAt(wall + offset + out, wall + offset + out + normal)
+			* CFrame.Angles(rng:NextNumber(-0.6, 0.6), rng:NextNumber(-0.6, 0.6), rng:NextNumber(0, 6.28))
+		part.Color = ore.color
+		part.Material = ore.material
+		part:SetAttribute("Ore", ore.name)
+		part.Parent = model
+	end
+
+	model.Parent = getOreFolder()
 end
+
+local DIRS = { Vector3.xAxis, -Vector3.xAxis, Vector3.yAxis, -Vector3.yAxis, Vector3.zAxis, -Vector3.zAxis }
 
 function Cave.generateChunk(cx: number, cy: number, cz: number)
 	local key = cx .. "," .. cy .. "," .. cz
@@ -175,13 +194,20 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 		for y = 2, CHUNK - 1 do
 			for z = 2, CHUNK - 1 do
 				if not air[x][y][z] then
-					local open = air[x + 1][y][z] or air[x - 1][y][z] or air[x][y + 1][z]
-						or air[x][y - 1][z] or air[x][y][z + 1] or air[x][y][z - 1]
-					if open then
+					-- point from the rock toward whatever air is next to it
+					local normal = Vector3.zero
+					for _, d in DIRS do
+						if air[x + d.X][y + d.Y][z + d.Z] then
+							normal += d
+						end
+					end
+					if normal.Magnitude > 0 then
 						local p = min + Vector3.new(x - 0.5, y - 0.5, z - 0.5) * VOXEL
 						local ore = pickOre(p.Y, rng)
 						if ore then
-							placeOre(ore, p, rng)
+							normal = normal.Unit
+							-- voxel centre is 2 studs inside the rock, so move out to the surface
+							placeOre(ore, p + normal * 2, normal, rng)
 						end
 					end
 				end
