@@ -24,4 +24,5 @@
 - digging next to ore used to leave it floating. now dug-out ore breaks and counts as mined (no regrow, its rock is gone), crystals/spikes/rubble/lanterns shatter, and reloaded chunks don't put anything back inside a dug hole
 - ore counts save with DataStore: on leaving, every 60s, and on shutdown. a failed load never saves over your real counts, and anything mined while loading gets added on top
 - readme: took the collage out, gold screenshot back on top
+- ore used to grow back straight into whoever was standing there. now it waits until the spot's clear, checking every 2 seconds
 - ores sit where the wall really is (blending the air/rock values) instead of the voxel edge, which was 1-3 studs behind the visible wall

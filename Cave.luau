@@ -1251,6 +1251,24 @@ local function shatter(model: Model)
 	end
 end
 
+-- is anyone standing where this ore would grow back?
+local function someoneInTheWay(model: Model): boolean
+	local characters = {}
+	for _, player in Players:GetPlayers() do
+		if player.Character then
+			table.insert(characters, player.Character)
+		end
+	end
+	if #characters == 0 then
+		return false
+	end
+	local params = OverlapParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = characters
+	local cf, size = model:GetBoundingBox()
+	return #Workspace:GetPartBoundsInBox(cf, size + Vector3.one * 2, params) > 0
+end
+
 -- respawn = grow back later. dug-out ores don't, the rock they grew on is gone
 local function breakOre(player: Player, model: Model, respawn: boolean)
 	local def = oreDef(model:GetAttribute("Ore"))
@@ -1273,6 +1291,10 @@ local function breakOre(player: Player, model: Model, respawn: boolean)
 	end
 	setVisible(model, false)
 	task.delay(def.respawn, function()
+		-- don't grow back inside somebody, wait for them to move
+		while model.Parent and someoneInTheWay(model) do
+			task.wait(2)
+		end
 		if model.Parent then
 			setVisible(model, true)
 			model:SetAttribute("Broken", nil)
