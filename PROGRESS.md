@@ -65,3 +65,7 @@
 **17 · decoration.** stalactites, stalagmites, rubble and little puddles (bottom left) in the plain rock bits, coloured to match the rock. the spikes look a bit like stacked boxes, roblox has no cone shape. going back to them
 
 ![stalactites and a puddle](progress/17-decoration.png)
+
+**18 · digging through crystals.** digging used to leave ore and crystals floating in the air. now anything you dig the rock out from under breaks, ore counts as mined, the rest shatters. also chunks unload when you're far away now and your digging comes back when they reload
+
+![digging through a crystal cave](progress/18-crystal-dig.gif)

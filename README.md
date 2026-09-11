@@ -2,7 +2,7 @@
 
 procedural mines for roblox. tunnels generate around you as you explore, every cave connects to every other one, and ore grows on the walls.
 
-![gold glowing next to a side tunnel](progress/08-gold.png)
+![digging through a crystal cave](progress/18-crystal-dig.gif)
 
 - terrain tunnels and chambers built as one connected network, so there's never a sealed-off pocket
 - rock changes with depth: sandstone, limestone, slate, basalt, then lava at the bottom
