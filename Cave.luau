@@ -13,13 +13,15 @@ local SIZE = CHUNK * VOXEL
 
 Cave.settings = {
 	seed = 1,
-	tunnelRadius = 5,
-	wiggle = 9, -- how far tunnels bend away from a straight line
-	bend = 0.015, -- how tight the bends are. much above 0.02 and tunnels tear into separate pockets
-	minRadius = 4, -- thinner than a voxel and the terrain grid breaks tunnels apart
-	chamberChance = 0.3, -- per node
-	chamberRadius = 15,
-	rampChance = 0.35, -- per node, a sloped tunnel down to the level below
+	tunnelRadius = 8,
+	wiggle = 12, -- how far tunnels bend away from a straight line
+	bend = 0.013, -- how tight the bends are. much above 0.02 and tunnels tear into separate pockets
+	minRadius = 5.5, -- too thin and the terrain grid breaks tunnels apart
+	chamberChance = 0.5, -- per node
+	chamberRadius = 22,
+	southChance = 0.6, -- east links are always there, south ones only sometimes, so it's less of a grid
+	diagChance = 0.25,
+	rampChance = 0.45, -- per node, a sloped tunnel down to the level below
 	top = 0, -- nothing generates above this y
 	-- top down, each layer starts at this y (edges get warped by noise)
 	layers = {
@@ -40,6 +42,7 @@ Cave.settings = {
 		[Enum.Material.Ground] = Color3.fromRGB(88, 70, 52),
 	},
 	radius = 2, -- chunks around each player
+	oreOffset = 2, -- studs to push ore out of the wall. roblox draws the wall further into the tunnel than the maths says, Cave.measure() tells you the real number
 	ores = {
 		{ name = "Coal", color = Color3.fromRGB(34, 34, 38), material = Enum.Material.Slate, below = 0, chance = 0.012 },
 		{ name = "Iron", color = Color3.fromRGB(196, 132, 90), material = Enum.Material.Rock, below = -60, chance = 0.008 },
@@ -85,9 +88,9 @@ end
 
 local function nodeAt(cx: number, cy: number, cz: number): Vector3
 	return Vector3.new(
-		cx + 0.25 + hash(cx, cy, cz, 1) * 0.5,
-		cy + 0.35 + hash(cx, cy, cz, 2) * 0.3,
-		cz + 0.25 + hash(cx, cy, cz, 3) * 0.5
+		cx + 0.1 + hash(cx, cy, cz, 1) * 0.8,
+		cy + 0.3 + hash(cx, cy, cz, 2) * 0.4,
+		cz + 0.1 + hash(cx, cy, cz, 3) * 0.8
 	) * SIZE
 end
 
@@ -101,7 +104,7 @@ local function featuresFor(cx: number, cy: number, cz: number)
 
 	local s = Cave.settings
 	local tunnels, chambers = {}, {}
-	local reach = s.chamberRadius * 1.3 + s.wiggle + VOXEL
+	local reach = s.chamberRadius * 1.3 + s.wiggle + VOXEL + s.tunnelRadius * 1.4
 	local lo = Vector3.new(cx, cy, cz) * SIZE - Vector3.one * reach
 	local hi = Vector3.new(cx + 1, cy + 1, cz + 1) * SIZE + Vector3.one * reach
 
@@ -115,7 +118,13 @@ local function featuresFor(cx: number, cy: number, cz: number)
 			for z = cz - 2, cz + 1 do
 				if hasNode(y) then
 					local a = nodeAt(x, y, z)
-					local links = { nodeAt(x + 1, y, z), nodeAt(x, y, z + 1) }
+					local links = { nodeAt(x + 1, y, z) }
+					if hash(x, y, z, 8) < s.southChance then
+						table.insert(links, nodeAt(x, y, z + 1))
+					end
+					if hash(x, y, z, 9) < s.diagChance then
+						table.insert(links, nodeAt(x + 1, y, z + 1))
+					end
 					if hash(x, y, z, 4) < s.rampChance and hasNode(y - 1) then
 						if hash(x, y, z, 5) < 0.5 then
 							table.insert(links, nodeAt(x + 1, y - 1, z))
@@ -330,7 +339,7 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 						local ore = pickOre(p.Y, rng)
 						if ore then
 							local wall, normal = wallBetween(p, open)
-							placeOre(ore, wall, normal, rng)
+							placeOre(ore, wall + normal * s.oreOffset, normal, rng)
 							Cave.placed += 1
 						end
 					end
@@ -408,6 +417,35 @@ function Cave.check()
 		end
 	end
 	print(("cave check: terrain matches the code at %d of %d points"):format(same, total))
+end
+
+-- run in PLAY mode (raycasts don't see fresh terrain in edit mode). fires rays at the walls
+-- from the spawn and compares where roblox's wall really is with where the code thinks it is
+function Cave.measure()
+	local spot = Cave.findSpawn()
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = { terrain }
+	local rng = Random.new(2)
+	local sum, n = 0, 0
+	for _ = 1, 60 do
+		local dir = Vector3.new(rng:NextNumber(-1, 1), rng:NextNumber(-0.6, 0.6), rng:NextNumber(-1, 1))
+		if dir.Magnitude > 0.1 then
+			local hit = Workspace:Raycast(spot, dir.Unit * 80, params)
+			if hit then
+				-- airness at roblox's wall: 0 = same place, positive = roblox's wall is further into the tunnel
+				sum += airness(hit.Position)
+				n += 1
+			end
+		end
+	end
+	if n == 0 then
+		print("cave measure: no rays hit anything, are you in play mode?")
+	else
+		print(("cave measure: %d rays hit. roblox's wall is %.2f studs %s the code's wall"):format(
+			n, math.abs(sum / n), if sum > 0 then "in front of (into the tunnel from)" else "behind"))
+		print(("cave measure: set oreOffset = %.1f"):format(math.max(0, sum / n)))
+	end
 end
 
 function Cave.clear()

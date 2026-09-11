@@ -15,3 +15,7 @@
 **tried raycasting the ores onto the walls.** 0 placed, 2080 skipped. raycasts don't see terrain you just wrote in edit mode. did at least prove the terrain matches the code 300/300, so the cave maths was fine all along
 
 ![raycast attempt, no ores](progress%20images/Screenshot%202026-09-11%20145430.png)
+
+**tunnel network.** threw out the noise blobs, they could never guarantee every cave connects. now every chunk has a node and tunnels link the nodes, so it's one connected web. way too thin and way too grid-like though
+
+![tunnel network, first version](progress%20images/Screenshot%202026-09-11%20150537.png)
