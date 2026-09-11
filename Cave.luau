@@ -57,7 +57,7 @@ Cave.settings = {
 		[Enum.Material.Mud] = Color3.fromRGB(58, 50, 46),
 		[Enum.Material.LeafyGrass] = Color3.fromRGB(38, 72, 64),
 		-- flooded biome
-		[Enum.Material.Pebble] = Color3.fromRGB(70, 86, 84),
+		[Enum.Material.Cobblestone] = Color3.fromRGB(70, 86, 84),
 		[Enum.Material.Sand] = Color3.fromRGB(96, 104, 92),
 	},
 	-- plain rock areas only, chances per ceiling/floor voxel
@@ -342,7 +342,7 @@ local function materialAt(p: Vector3, isFloor: boolean): Enum.Material
 	elseif biome == "mushroom" then
 		return if isFloor then Enum.Material.LeafyGrass else Enum.Material.Mud
 	elseif biome == "flooded" then
-		return if isFloor then Enum.Material.Sand else Enum.Material.Pebble
+		return if isFloor then Enum.Material.Sand else Enum.Material.Cobblestone
 	end
 
 	if p.Y < s.lavaBelow and math.noise(p.X * 0.04, p.Y * 0.04 + o, p.Z * 0.04) > 0.3 then
