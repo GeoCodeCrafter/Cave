@@ -37,3 +37,11 @@
 **10 · bigger spawn room, striped rock.** 40x40 with a dome, dug out under the floor so the terrain stops creeping over the planks. rock has thin stripes through each layer now and the light's warm white instead of orange
 
 ![bigger spawn room](progress/10-bigger-spawn.png)
+
+**11 · the deep end.** below about -280 the walls turn to cracked lava. diamond only shows up down here
+
+![lava walls and diamond](progress/11-deep-lava.png)
+
+**12 · caverns.** 1 junction in 14 is a huge flattened dome with rock pillars instead of a normal chamber. seen from outside here so you can see how many there are. the pillars left a few single-voxel air bubbles in the sim, so lone air voxels get filled back in
+
+![caverns from outside](progress/12-caverns.png)

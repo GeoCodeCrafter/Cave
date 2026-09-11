@@ -48,6 +48,22 @@ Cave.settings = {
 		[Enum.Material.Basalt] = Color3.fromRGB(50, 47, 52),
 		[Enum.Material.Rock] = Color3.fromRGB(118, 110, 100),
 		[Enum.Material.Ground] = Color3.fromRGB(80, 66, 52),
+		-- crystal biome
+		[Enum.Material.Salt] = Color3.fromRGB(176, 166, 196),
+		[Enum.Material.Glacier] = Color3.fromRGB(116, 104, 176),
+		-- mushroom biome
+		[Enum.Material.Mud] = Color3.fromRGB(58, 50, 46),
+		[Enum.Material.LeafyGrass] = Color3.fromRGB(38, 72, 64),
+	},
+	-- big regions of the mine. above crystalAbove = crystal caves, below mushroomBelow = mushroom caves
+	biomes = {
+		scale = 0.0035, -- smaller = bigger regions
+		crystalAbove = 0.2,
+		mushroomBelow = -0.2,
+		crystalChance = 0.035, -- per wall voxel
+		mushroomChance = 0.05, -- per floor voxel
+		crystalColors = { Color3.fromRGB(170, 90, 255), Color3.fromRGB(80, 225, 255), Color3.fromRGB(255, 105, 215) },
+		mushroomColors = { Color3.fromRGB(60, 255, 200), Color3.fromRGB(90, 170, 255), Color3.fromRGB(160, 255, 90) },
 	},
 	radius = 2, -- chunks around each player
 	oreOffset = 2, -- studs to push ore out of the wall. roblox draws the wall further into the tunnel than the maths says, Cave.measure() tells you the real number
@@ -238,9 +254,31 @@ end
 
 -- ============================================================ materials
 
+local function biomeAt(p: Vector3): string
+	local b = Cave.settings.biomes
+	local n = math.noise(p.X * b.scale + Cave.settings.seed * 7.7, p.Y * b.scale * 0.5, p.Z * b.scale)
+	if n > b.crystalAbove then
+		return "crystal"
+	elseif n < b.mushroomBelow then
+		return "mushroom"
+	end
+	return "rock"
+end
+Cave.biomeAt = biomeAt
+
 local function materialAt(p: Vector3, isFloor: boolean): Enum.Material
 	local s = Cave.settings
 	local o = s.seed * 31.7
+
+	local biome = biomeAt(p)
+	if biome == "crystal" then
+		if isFloor then
+			return Enum.Material.Salt
+		end
+		return if math.noise(p.X * 0.06, p.Y * 0.06, p.Z * 0.06 + o) > 0.2 then Enum.Material.Glacier else Enum.Material.Basalt
+	elseif biome == "mushroom" then
+		return if isFloor then Enum.Material.LeafyGrass else Enum.Material.Mud
+	end
 
 	if p.Y < s.lavaBelow and math.noise(p.X * 0.04, p.Y * 0.04 + o, p.Z * 0.04) > 0.3 then
 		return Enum.Material.CrackedLava
@@ -383,6 +421,99 @@ local function wallBetween(rock: Vector3, open: Vector3): (Vector3, Vector3)
 	return wall, if normal.Magnitude > 0 then normal.Unit else open
 end
 
+local function safeLookAt(from: Vector3, dir: Vector3): CFrame
+	return CFrame.lookAt(from, from + dir, if math.abs(dir.Y) > 0.9 then Vector3.xAxis else Vector3.yAxis)
+end
+
+-- a spray of glowing crystals growing out of any surface
+local function placeCrystal(wall: Vector3, normal: Vector3, rng: Random)
+	local b = Cave.settings.biomes
+	local color = b.crystalColors[rng:NextInteger(1, #b.crystalColors)]
+	local side = normal:Cross(if math.abs(normal.Y) < 0.9 then Vector3.yAxis else Vector3.xAxis).Unit
+	local up = normal:Cross(side)
+
+	local model = Instance.new("Model")
+	model.Name = "Crystal"
+	for _ = 1, rng:NextInteger(3, 6) do
+		local len = rng:NextNumber(2.5, 7)
+		local width = rng:NextNumber(0.5, 1.3)
+		local dir = (normal + side * rng:NextNumber(-0.6, 0.6) + up * rng:NextNumber(-0.6, 0.6)).Unit
+		local base = wall + side * rng:NextNumber(-1, 1) + up * rng:NextNumber(-1, 1) - normal * 0.5
+
+		local part = Instance.new("Part")
+		part.Name = "Shard"
+		part.Anchored = true
+		part.CanCollide = false
+		part.CastShadow = false
+		part.Material = Enum.Material.Neon
+		part.Color = color
+		part.Transparency = 0.15
+		part.Size = Vector3.new(width, width, len)
+		part.CFrame = safeLookAt(base + dir * len / 2, dir)
+		part.Parent = model
+	end
+
+	if rng:NextNumber() < 0.4 then
+		local light = Instance.new("PointLight")
+		light.Color = color
+		light.Range = 18
+		light.Brightness = 1.4
+		light.Shadows = false
+		light.Parent = model:FindFirstChildWhichIsA("BasePart")
+	end
+	model.Parent = getFolder("Decor")
+end
+
+-- a little clump of glowing mushrooms on a floor
+local function placeMushroom(floor: Vector3, rng: Random)
+	local b = Cave.settings.biomes
+	local color = b.mushroomColors[rng:NextInteger(1, #b.mushroomColors)]
+	local model = Instance.new("Model")
+	model.Name = "Mushrooms"
+
+	for _ = 1, rng:NextInteger(1, 4) do
+		local height = rng:NextNumber(1.5, 5)
+		local capRadius = rng:NextNumber(1.2, 3.2)
+		local at = floor + Vector3.new(rng:NextNumber(-2, 2), -0.3, rng:NextNumber(-2, 2))
+		-- cylinders lie along x, so turn them upright
+		local upright = CFrame.Angles(0, 0, math.pi / 2)
+
+		local stem = Instance.new("Part")
+		stem.Name = "Stem"
+		stem.Shape = Enum.PartType.Cylinder
+		stem.Anchored = true
+		stem.CanCollide = false
+		stem.Material = Enum.Material.SmoothPlastic
+		stem.Color = Color3.fromRGB(214, 208, 192)
+		local thick = rng:NextNumber(0.5, 0.9)
+		stem.Size = Vector3.new(height, thick, thick)
+		stem.CFrame = CFrame.new(at + Vector3.new(0, height / 2, 0)) * upright
+		stem.Parent = model
+
+		local cap = Instance.new("Part")
+		cap.Name = "Cap"
+		cap.Shape = Enum.PartType.Cylinder
+		cap.Anchored = true
+		cap.CanCollide = false
+		cap.CastShadow = false
+		cap.Material = Enum.Material.Neon
+		cap.Color = color
+		cap.Size = Vector3.new(0.6, capRadius * 2, capRadius * 2)
+		cap.CFrame = CFrame.new(at + Vector3.new(0, height, 0)) * upright
+		cap.Parent = model
+	end
+
+	if rng:NextNumber() < 0.5 then
+		local light = Instance.new("PointLight")
+		light.Color = color
+		light.Range = 16
+		light.Brightness = 1.2
+		light.Shadows = false
+		light.Parent = model:FindFirstChild("Cap")
+	end
+	model.Parent = getFolder("Decor")
+end
+
 -- a lantern hanging on a chain from the ceiling above a node. nodes are always open space
 local function placeLantern(at: Vector3)
 	local s = Cave.settings.lantern
@@ -498,8 +629,12 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 
 	terrain:WriteVoxels(Region3.new(min, min + Vector3.one * SIZE), VOXEL, materials, occupancy)
 
+	-- crystal and mushroom caves light themselves, lanterns only in plain rock
 	if hasNode(cy) then
-		placeLantern(nodeAt(cx, cy, cz))
+		local node = nodeAt(cx, cy, cz)
+		if biomeAt(node) == "rock" then
+			placeLantern(node)
+		end
 	end
 
 	-- ore on walls: rock voxels with air right next to them, placed on the real surface
@@ -522,6 +657,17 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 							local wall, normal = wallBetween(p, open)
 							placeOre(ore, wall + normal * s.oreOffset, normal, rng)
 							Cave.placed += 1
+						else
+							local biome = biomeAt(p)
+							if biome == "crystal" and rng:NextNumber() < s.biomes.crystalChance then
+								local wall, normal = wallBetween(p, open)
+								placeCrystal(wall + normal * s.oreOffset * 0.5, normal, rng)
+							elseif biome == "mushroom" and open == Vector3.yAxis and rng:NextNumber() < s.biomes.mushroomChance then
+								local wall, normal = wallBetween(p, open)
+								if normal.Y > 0.6 then
+									placeMushroom(wall + normal * s.oreOffset, rng)
+								end
+							end
 						end
 					end
 				end
@@ -611,6 +757,24 @@ function Cave.findCavern(near: Vector3?): Vector3?
 	return nil
 end
 
+-- jump to the nearest "crystal" / "mushroom" / "rock" area, builds around it and moves the camera there
+function Cave.findBiome(name: string, near: Vector3?): Vector3?
+	local c = near or Vector3.new(0, -60, 0)
+	for r = 0, 1600, 32 do
+		for i = 0, math.max(1, math.floor(r / 16)) - 1 do
+			local angle = i / math.max(1, math.floor(r / 16)) * math.pi * 2
+			local p = Vector3.new(c.X + math.cos(angle) * r, c.Y, c.Z + math.sin(angle) * r)
+			if biomeAt(p) == name then
+				local spot = Cave.preview(p, 2)
+				print("cave:", name, "biome at", spot)
+				return spot
+			end
+		end
+	end
+	warn("cave: no " .. name .. " biome found nearby, try another seed or change biomes.crystalAbove / mushroomBelow")
+	return nil
+end
+
 -- a dug-out room with a plank floor, support beams, a lantern and a real SpawnLocation.
 -- it sits on a node so the tunnels always connect to it. returns where players spawn
 function Cave.buildSpawnRoom(center: Vector3?): CFrame
@@ -626,7 +790,7 @@ function Cave.buildSpawnRoom(center: Vector3?): CFrame
 
 	-- anything generated inside the room would be floating now
 	local half = size / 2 + Vector3.new(size.X * 0.2, size.Y, size.Z * 0.2)
-	for _, folder in { getOreFolder(), getFolder("Lanterns") } do
+	for _, folder in { getOreFolder(), getFolder("Lanterns"), getFolder("Decor") } do
 		for _, model in folder:GetChildren() do
 			if model:IsA("Model") then
 				local offset = model:GetPivot().Position - middle
@@ -752,6 +916,7 @@ function Cave.clear()
 	terrain:Clear()
 	getOreFolder():ClearAllChildren()
 	getFolder("Lanterns"):ClearAllChildren()
+	getFolder("Decor"):ClearAllChildren()
 	table.clear(done)
 	table.clear(featureCache)
 	Cave.placed = 0
