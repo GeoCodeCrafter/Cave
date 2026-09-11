@@ -23,3 +23,9 @@
 **ores actually in the tunnels.** wider tunnels, and the ores get pushed 2 studs out of the wall because roblox draws the wall further in than the maths says. first time you can walk up to one. still way too dark though
 
 ![ores on the tunnel walls](progress%20images/Screenshot%202026-09-11%20151150.png)
+
+**lighting.** lantern on a chain at every junction, gold and diamond glow, warm haze, bloom. switched lighting to Future for the shadows. finally looks like a mine
+
+![lanterns and iron on the wall](progress%20images/Screenshot%202026-09-11%20151511.png)
+
+![gold glowing by a side tunnel](progress%20images/Screenshot%202026-09-11%20151534.png)
