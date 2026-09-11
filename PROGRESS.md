@@ -53,3 +53,7 @@
 **14 · where the biomes meet.** crystal on the left running into plain striped rock on the right. there's mushroom caves too, mossy floors and glowing mushrooms
 
 ![crystal biome next to plain rock](progress/14-crystal-meets-rock.png)
+
+**15 · digging.** hold click on rock and you carve through it, dust comes off in the rock's colour. first version wouldn't let you dig the spawn room walls, which is exactly where you try it first, so that rule's gone
+
+![digging into the spawn room wall](progress/15-digging.gif)
