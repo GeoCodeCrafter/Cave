@@ -1127,17 +1127,6 @@ local function dust(at: Vector3)
 	Debris:AddItem(puff, 1)
 end
 
-local function insideSpawnRoom(at: Vector3): boolean
-	local room = Workspace:FindFirstChild("SpawnRoom")
-	if not room or not room:IsA("Model") then
-		return false
-	end
-	local cf, size = room:GetBoundingBox()
-	local p = cf:PointToObjectSpace(at)
-	local half = size / 2 + Vector3.one * 3
-	return math.abs(p.X) < half.X and math.abs(p.Y) < half.Y + 6 and math.abs(p.Z) < half.Z
-end
-
 -- the client (Dig.client.luau) sends where you're pointing, the server decides if you're allowed
 function Cave.enableDigging()
 	local remote = ReplicatedStorage:FindFirstChild("CaveDig") :: RemoteEvent?
@@ -1161,7 +1150,7 @@ function Cave.enableDigging()
 		if not root or (root.Position - at).Magnitude > s.digReach then
 			return
 		end
-		if at.Y > s.top - 2 or insideSpawnRoom(at) then
+		if at.Y > s.top - 2 then
 			return
 		end
 		lastDig[player] = now
