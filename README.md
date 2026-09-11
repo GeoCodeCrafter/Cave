@@ -4,11 +4,16 @@ procedural mines for roblox. tunnels generate around you as you explore, every c
 
 ![gold glowing next to a side tunnel](progress/08-gold.png)
 
-- terrain tunnels and chambers built as one connected network, so there's never a sealed-off pocket
-- rock changes with depth: sandstone, limestone, slate, basalt, then lava at the bottom
-- coal, iron, gold and diamond on the tunnel walls. gold and diamond glow
-- a lantern at every junction
-- generates in chunks around players, or in edit mode with `Cave.preview()` so you can fly around it
+- terrain tunnels, chambers and the odd huge cavern with rock pillars, all one connected network so there's never a sealed-off pocket
+- rock changes with depth: sandstone, limestone, slate, basalt, then lava at the bottom. thin stripes through each layer
+- biomes: plain rock with lanterns, crystal caves full of glowing neon crystals, and mushroom caves
+- stalactites, stalagmites, rubble and little puddles in the plain rock bits
+- coal, iron, gold and diamond on the walls. hit them with the pickaxe to mine them, they grow back later
+- hold click on rock to dig your own tunnels. whatever you dig out from under breaks instead of floating
+- ore counts save between sessions
+- spawn room at a junction so you never spawn inside rock
+- chunks load nearest first around players and unload when nobody's near, digging is remembered
+- `Cave.preview()`, `Cave.findCavern()` and `Cave.findBiome("crystal")` build it in edit mode so you can fly around
 
 ## setup
 
@@ -16,7 +21,7 @@ procedural mines for roblox. tunnels generate around you as you explore, every c
 2. put `Test.server.luau` next to it as a Script. it builds the area around a tunnel and spawns you in it
 3. put `Dig.client.luau` in StarterPlayerScripts as a LocalScript. it's the pickaxe: equip it and hold click to mine ore and dig rock
 4. set `Lighting.Technology` to Future (scripts can't change it)
-5. to keep ore counts between sessions, publish the place and turn on Studio Access to API Services (Game Settings → Security)
+5. to keep ore counts between sessions, publish the place and turn on Studio Access to API Services (File → Experience Settings → Security)
 
 everything you'd want to tweak is in `Cave.settings` at the top of the module.
 
