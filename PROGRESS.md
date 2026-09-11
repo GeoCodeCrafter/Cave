@@ -61,3 +61,7 @@
 **16 · mushroom caves.** the other biome. mud walls, mossy floor, and glowing mushrooms that light the tunnel instead of lanterns
 
 ![a glowing mushroom in a mossy tunnel](progress/16-mushroom-cave.png)
+
+**17 · decoration.** stalactites, stalagmites, rubble and little puddles (bottom left) in the plain rock bits, coloured to match the rock. the spikes look a bit like stacked boxes, roblox has no cone shape. going back to them
+
+![stalactites and a puddle](progress/17-decoration.png)

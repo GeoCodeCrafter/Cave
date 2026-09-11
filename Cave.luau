@@ -74,6 +74,8 @@ Cave.settings = {
 		mushroomColors = { Color3.fromRGB(60, 255, 200), Color3.fromRGB(90, 170, 255), Color3.fromRGB(160, 255, 90) },
 	},
 	radius = 2, -- chunks around each player
+	unloadMargin = 2, -- chunks past radius before a chunk gets cleared away
+	lightDistance = 110, -- lights further than this from every player switch off
 	oreOffset = 2, -- studs to push ore out of the wall. roblox draws the wall further into the tunnel than the maths says, Cave.measure() tells you the real number
 	lantern = { color = Color3.fromRGB(255, 206, 158), brightness = 1.6, range = 36 },
 	oreGlow = {
@@ -111,6 +113,30 @@ end
 
 local function getOreFolder(): Folder
 	return getFolder("Ores")
+end
+
+-- everything a chunk made, so it can be removed again when nobody's near
+local chunkObjects: { [string]: { Instance } } = {}
+local chunkCoords: { [string]: Vector3 } = {}
+local pinned: { [string]: boolean } = {}
+local digs: { { at: Vector3, r: number } } = {}
+local lights: { [PointLight]: boolean } = setmetatable({}, { __mode = "k" }) :: any
+local collecting: { Instance }? = nil
+
+local function chunkKey(cx: number, cy: number, cz: number): string
+	return cx .. "," .. cy .. "," .. cz
+end
+
+local function keep(model: Instance, folderName: string)
+	model.Parent = getFolder(folderName)
+	if collecting then
+		table.insert(collecting, model)
+	end
+	for _, d in model:GetDescendants() do
+		if d:IsA("PointLight") then
+			lights[d] = true
+		end
+	end
 end
 
 -- ============================================================ the tunnel network
@@ -421,7 +447,7 @@ local function placeOre(ore, wall: Vector3, normal: Vector3, rng: Random)
 		light.Parent = first
 	end
 
-	model.Parent = getOreFolder()
+	keep(model, "Ores")
 end
 
 -- where the wall actually is between a rock point and an air point, and which way it faces
@@ -479,7 +505,7 @@ local function placeCrystal(wall: Vector3, normal: Vector3, rng: Random)
 		light.Shadows = false
 		light.Parent = model:FindFirstChildWhichIsA("BasePart")
 	end
-	model.Parent = getFolder("Decor")
+	keep(model, "Decor")
 end
 
 -- a little clump of glowing mushrooms on a floor
@@ -529,7 +555,7 @@ local function placeMushroom(floor: Vector3, rng: Random)
 		light.Shadows = false
 		light.Parent = model:FindFirstChild("Cap")
 	end
-	model.Parent = getFolder("Decor")
+	keep(model, "Decor")
 end
 
 -- the colour of the rock at a point, so spikes and rubble match the wall they grow out of
@@ -564,7 +590,7 @@ local function placeSpike(base: Vector3, up: Vector3, color: Color3, rng: Random
 		part.CFrame = axis * CFrame.new(0, sign * (h * i + h / 2 - 0.6), 0) * CFrame.Angles(0, spin + i * 0.5, 0)
 		part.Parent = model
 	end
-	model.Parent = getFolder("Decor")
+	keep(model, "Decor")
 end
 
 local function placeRubble(floor: Vector3, color: Color3, rng: Random)
@@ -582,7 +608,7 @@ local function placeRubble(floor: Vector3, color: Color3, rng: Random)
 			* CFrame.Angles(rng:NextNumber(0, 6.28), rng:NextNumber(0, 6.28), rng:NextNumber(0, 6.28))
 		part.Parent = model
 	end
-	model.Parent = getFolder("Decor")
+	keep(model, "Decor")
 end
 
 -- sinks a shallow disc of real terrain water into the floor
@@ -636,7 +662,7 @@ local function placeLantern(at: Vector3)
 	light.Shadows = true
 	light.Parent = body
 
-	model.Parent = getFolder("Lanterns")
+	keep(model, "Lanterns")
 end
 
 local DIRS = { Vector3.xAxis, -Vector3.xAxis, Vector3.yAxis, -Vector3.yAxis, Vector3.zAxis, -Vector3.zAxis }
@@ -655,6 +681,11 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 	if min.Y >= s.top then
 		return
 	end
+
+	local objects = {}
+	collecting = objects
+	chunkObjects[key] = objects
+	chunkCoords[key] = Vector3.new(cx, cy, cz)
 
 	local materials = table.create(CHUNK)
 	local occupancy = table.create(CHUNK)
@@ -704,6 +735,17 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 	end
 
 	terrain:WriteVoxels(Region3.new(min, min + Vector3.one * SIZE), VOXEL, materials, occupancy)
+
+	-- put back any digging that happened here before the chunk was unloaded
+	for _, d in digs do
+		local c = d.at
+		if c.X > min.X - d.r and c.X < min.X + SIZE + d.r
+			and c.Y > min.Y - d.r and c.Y < min.Y + SIZE + d.r
+			and c.Z > min.Z - d.r and c.Z < min.Z + SIZE + d.r
+		then
+			terrain:FillBall(c, d.r, Enum.Material.Air)
+		end
+	end
 
 	-- crystal and mushroom caves light themselves, lanterns only in plain rock
 	if hasNode(cy) then
@@ -767,18 +809,97 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 				end
 			end
 		end
-	end
+	end	collecting = nil
 end
 
+-- nearest chunks first, so whatever you're walking into shows up before the ones behind you
 function Cave.around(pos: Vector3)
 	local r = Cave.settings.radius
 	local cx, cy, cz = math.floor(pos.X / SIZE), math.floor(pos.Y / SIZE), math.floor(pos.Z / SIZE)
+	local todo = {}
 	for dy = -1, 1 do
 		for dx = -r, r do
 			for dz = -r, r do
-				Cave.generateChunk(cx + dx, cy + dy, cz + dz)
-				task.wait()
+				if not done[chunkKey(cx + dx, cy + dy, cz + dz)] then
+					table.insert(todo, Vector3.new(dx, dy, dz))
+				end
 			end
+		end
+	end
+	table.sort(todo, function(a, b)
+		return a.Magnitude < b.Magnitude
+	end)
+	for _, d in todo do
+		Cave.generateChunk(cx + d.X, cy + d.Y, cz + d.Z)
+		task.wait()
+	end
+end
+
+local function unloadChunk(key: string, c: Vector3)
+	for _, model in chunkObjects[key] or {} do
+		model:Destroy()
+	end
+	chunkObjects[key] = nil
+	chunkCoords[key] = nil
+	done[key] = nil
+	terrain:FillBlock(CFrame.new(c * SIZE + Vector3.one * SIZE / 2), Vector3.one * SIZE, Enum.Material.Air)
+end
+
+-- clears chunks that are far from every player. the spawn room's chunks are never cleared
+function Cave.unloadFar()
+	local keepWithin = Cave.settings.radius + Cave.settings.unloadMargin
+	local centers = {}
+	for _, player in Players:GetPlayers() do
+		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if root then
+			local p = root.Position
+			table.insert(centers, Vector3.new(math.floor(p.X / SIZE), math.floor(p.Y / SIZE), math.floor(p.Z / SIZE)))
+		end
+	end
+	if #centers == 0 then
+		return
+	end
+	for key, c in chunkCoords do
+		if not pinned[key] then
+			local near = false
+			for _, p in centers do
+				local d = c - p
+				if math.max(math.abs(d.X), math.abs(d.Y), math.abs(d.Z)) <= keepWithin then
+					near = true
+					break
+				end
+			end
+			if not near then
+				unloadChunk(key, c)
+			end
+		end
+	end
+end
+
+-- lights far from everyone switch off. broken ores keep theirs off
+local function cullLights()
+	local roots = {}
+	for _, player in Players:GetPlayers() do
+		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if root then
+			table.insert(roots, root.Position)
+		end
+	end
+	local far = Cave.settings.lightDistance
+	for light in lights do
+		local part = light.Parent
+		if part and part:IsA("BasePart") then
+			local near = false
+			for _, pos in roots do
+				if (pos - part.Position).Magnitude < far then
+					near = true
+					break
+				end
+			end
+			local owner = part.Parent
+			light.Enabled = near and not (owner and owner:GetAttribute("Broken"))
+		else
+			lights[light] = nil
 		end
 	end
 end
@@ -874,6 +995,16 @@ end
 function Cave.buildSpawnRoom(center: Vector3?): CFrame
 	local spot = Cave.preview(center, 2)
 	local floorY = spot.Y - 3
+
+	-- the spawn room's chunks never get unloaded
+	local sx, sy, sz = math.floor(spot.X / SIZE), math.floor(spot.Y / SIZE), math.floor(spot.Z / SIZE)
+	for dx = -1, 1 do
+		for dy = -1, 1 do
+			for dz = -1, 1 do
+				pinned[chunkKey(sx + dx, sy + dy, sz + dz)] = true
+			end
+		end
+	end
 	local size = Vector3.new(40, 16, 40)
 	local middle = Vector3.new(spot.X, floorY + size.Y / 2, spot.Z)
 
@@ -1012,6 +1143,11 @@ function Cave.clear()
 	getFolder("Lanterns"):ClearAllChildren()
 	getFolder("Decor"):ClearAllChildren()
 	table.clear(done)
+	table.clear(chunkObjects)
+	table.clear(chunkCoords)
+	table.clear(pinned)
+	table.clear(digs)
+	table.clear(lights)
 	table.clear(featureCache)
 	Cave.placed = 0
 end
@@ -1249,6 +1385,7 @@ function Cave.enableDigging()
 		local into = (at - root.Position).Unit
 		dust(at - into)
 		terrain:FillBall(at + into, s.digRadius, Enum.Material.Air)
+		table.insert(digs, { at = at + into, r = s.digRadius })
 	end)
 
 	Players.PlayerRemoving:Connect(function(player)
@@ -1261,6 +1398,19 @@ function Cave.start()
 	Cave.applyLighting()
 	Cave.enableMining()
 	Cave.enableDigging()
+
+	task.spawn(function()
+		while true do
+			task.wait(3)
+			Cave.unloadFar()
+		end
+	end)
+	task.spawn(function()
+		while true do
+			cullLights()
+			task.wait(0.5)
+		end
+	end)
 	task.spawn(function()
 		while true do
 			for _, player in Players:GetPlayers() do
