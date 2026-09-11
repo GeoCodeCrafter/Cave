@@ -4,16 +4,16 @@
     "$className": "DataModel",
     "ServerScriptService": {
       "Cave": {
-        "$path": "Cave.luau"
+        "$path": "src/Cave.luau"
       },
-      "Test": {
-        "$path": "Test.server.luau"
+      "Start": {
+        "$path": "src/Start.server.luau"
       }
     },
     "StarterPlayer": {
       "StarterPlayerScripts": {
-        "Dig": {
-          "$path": "Dig.client.luau"
+        "Pickaxe": {
+          "$path": "src/Pickaxe.client.luau"
         }
       }
     },

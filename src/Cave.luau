@@ -1506,11 +1506,12 @@ function Cave.buildSpawnRoom(center: Vector3?): CFrame
 
 	-- the first tunnel: lanterns showing the way out, and a bit of easy ore so the first minute pays off
 	local rng = Random.new(Cave.settings.seed * 31 + 7)
-	for _, t in { 0.3, 0.55, 0.8 } do
+	-- starts past the dug-out room, otherwise the wall they need is already gone
+	for _, t in { 0.5, 0.72, 0.95 } do
 		placeLantern(unwarp(node:Lerp(east, t)))
 	end
 	local right = flatDir:Cross(Vector3.yAxis).Unit
-	for i, pick in { { t = 0.35, side = 1, ore = 1 }, { t = 0.5, side = -1, ore = 1 }, { t = 0.65, side = 1, ore = 2 } } do
+	for i, pick in { { t = 0.55, side = 1, ore = 1 }, { t = 0.68, side = -1, ore = 1 }, { t = 0.82, side = 1, ore = 2 } } do
 		local from = unwarp(node:Lerp(east, pick.t))
 		local dir = (right * pick.side + Vector3.new(0, -0.3, 0)).Unit
 		for s = 0.5, 24, 0.5 do
@@ -1959,7 +1960,7 @@ local function clearDugOut(player: Player, center: Vector3, radius: number)
 	end
 end
 
--- the client (Dig.client.luau) sends where you're pointing, the server decides if you're allowed
+-- the pickaxe (Pickaxe.client.luau) sends where you're pointing, the server decides if you're allowed
 local function digAt(player: Player, at: Vector3)
 	local s = Cave.settings
 	local now = os.clock()
@@ -2000,7 +2001,7 @@ local function hitSound(at: Vector3)
 	Debris:AddItem(spot, 2)
 end
 
--- the pickaxe (Dig.client.luau) sends what it hit, the server decides if you're allowed
+-- the pickaxe (Pickaxe.client.luau) sends what it hit, the server decides if you're allowed
 function Cave.enableDigging()
 	local remote = ReplicatedStorage:FindFirstChild("CaveSwing") :: RemoteEvent?
 	if not remote then
@@ -2088,9 +2089,35 @@ function Cave.enablePickaxe()
 	end
 end
 
+-- the seed in the bottom corner, so people can share a mine they liked
+function Cave.showSeed()
+	local StarterGui = game:GetService("StarterGui")
+	local old = StarterGui:FindFirstChild("CaveSeed")
+	if old then
+		old:Destroy()
+	end
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "CaveSeed"
+	gui.ResetOnSpawn = false
+	local label = Instance.new("TextLabel")
+	label.AnchorPoint = Vector2.new(0, 1)
+	label.Position = UDim2.new(0, 12, 1, -12)
+	label.Size = UDim2.fromOffset(220, 26)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.SourceSansSemibold
+	label.TextSize = 18
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.TextColor3 = Color3.fromRGB(235, 225, 205)
+	label.TextStrokeTransparency = 0.6
+	label.Text = "seed " .. tostring(Cave.settings.seed)
+	label.Parent = gui
+	gui.Parent = StarterGui
+end
+
 function Cave.start()
 	Cave.applyColors()
 	Cave.applyLighting()
+	Cave.showSeed()
 	Cave.enableMining()
 	Cave.enableDigging()
 	Cave.enablePickaxe()

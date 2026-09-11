@@ -32,5 +32,8 @@
 - tide pool biome instead: flooded tunnels were just big flat water sheets and bright green walls. now it's dry grey caves with small pools sunk into the floor, clear water, wet stones round the rim and glowing anemones at the bottom. water's clearer everywhere so you can see in
 - chasms: long ravines cut down through several layers, wide at the top and narrowing, walls bent like the tunnels. sagging rope bridges wherever a tunnel meets one, with the ends found by walking out until there's floor
 - starting area: spawn room gets rails and a minecart full of coal pointing at the first tunnel, crates, barrels, a tool rack and a sign with the controls. the first tunnel always has lanterns down it and a couple of coal and iron so you find something straight away
+- new mine every server: random seed, shown in the corner. LOCK_SEED in Start.server.luau keeps it the same
+- first tunnel's ore and lanterns moved further out, the dug-out spawn room reached them and left the ore floating
+- tidied the repo: scripts in src/ (Test.server.luau is Start.server.luau now, Dig.client.luau is Pickaxe.client.luau), MIT licence, readme rewritten
 - pickaxe was held backwards, head behind you. flipped the grip, and the swing is now a slow lift and a fast strike instead of the other way round
 - ores sit where the wall really is (blending the air/rock values) instead of the voxel edge, which was 1-3 studs behind the visible wall

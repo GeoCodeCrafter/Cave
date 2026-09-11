@@ -77,3 +77,7 @@
 **20 · chasms.** long ravines cutting down through a few layers of the mine, with sagging rope bridges wherever a tunnel comes out. the bridge ends get found by walking out from the middle until there's floor. before this i tried flooding whole tunnels with water, it looked awful, so that became little tide pools instead
 
 ![rope bridges at two levels of a chasm](progress/20-chasm-bridges.png)
+
+**21 · furnished spawn room.** rails and a minecart of coal pointing at the first tunnel, crates, barrels, a tool rack, and a sign with the controls. the first tunnel gets lanterns and some easy ore. the coal floating by the tunnel mouth here is a bug, the dug-out room reached further than the ore spots so it lost its wall. moved them further down the tunnel
+
+![the furnished spawn room](progress/21-furnished-spawn.png)

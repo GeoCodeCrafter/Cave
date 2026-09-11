@@ -1,10 +1,14 @@
 local Players = game:GetService("Players")
 
+-- a new mine every server. put a number here to always get the same one
+local LOCK_SEED: number? = nil
+
 -- nobody spawns until the mine exists, otherwise you land before the terrain does and fall forever
 Players.CharacterAutoLoads = false
 
 local Cave = require(game.ServerScriptService.Cave)
-Cave.settings.seed = 1
+Cave.settings.seed = LOCK_SEED or Random.new():NextInteger(1, 999999)
+print("cave: seed", Cave.settings.seed)
 
 -- wipe whatever preview() left in the place so there aren't two copies of every ore
 Cave.clear()
