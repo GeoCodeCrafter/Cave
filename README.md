@@ -33,8 +33,9 @@ or by hand:
 
 1. `src/Cave.luau` goes in ServerScriptService as a ModuleScript called `Cave`
 2. `src/Start.server.luau` goes next to it as a Script
-3. `src/Pickaxe.client.luau` and `src/Atmosphere.client.luau` go in StarterPlayerScripts as LocalScripts
-4. set `Lighting.Technology` to Future
+3. `src/Pickaxe.client.luau`, `src/Atmosphere.client.luau` and `src/Props.client.luau` go in StarterPlayerScripts as LocalScripts
+4. `src/CaveMeshes.luau` goes in ReplicatedStorage as a ModuleScript called `CaveMeshes`
+5. set `Lighting.Technology` to Future
 
 the rock texture is [Stylized Rock PBR Material](https://create.roblox.com/store/asset/80312067078613) by Nezhull (public domain). insert it from the toolbox and put it in MaterialService as `CaveRock`, plus copies with their BaseMaterial set to Slate, Sandstone and Limestone called `CaveRock_Slate`, `CaveRock_Sandstone` and `CaveRock_Limestone`. without it you just get roblox's normal rock, nothing breaks.
 

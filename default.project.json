@@ -10,6 +10,11 @@
         "$path": "src/Start.server.luau"
       }
     },
+    "ReplicatedStorage": {
+      "CaveMeshes": {
+        "$path": "src/CaveMeshes.luau"
+      }
+    },
     "StarterPlayer": {
       "StarterPlayerScripts": {
         "Pickaxe": {
@@ -17,6 +22,9 @@
         },
         "Atmosphere": {
           "$path": "src/Atmosphere.client.luau"
+        },
+        "Props": {
+          "$path": "src/Props.client.luau"
         }
       }
     },

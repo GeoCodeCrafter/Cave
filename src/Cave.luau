@@ -98,7 +98,10 @@ Cave.settings = {
 	radius = 2, -- chunks around each player
 	unloadMargin = 2, -- chunks past radius before a chunk gets cleared away
 	lightDistance = 110, -- lights further than this from every player switch off
-	oreOffset = 2, -- studs to push ore out of the wall. roblox draws the wall further into the tunnel than the maths says, Cave.measure() tells you the real number
+	-- studs to push ore out of the wall. was 2 back when walls were smooth tubes, but on the rough
+	-- walls that shoved about 1 clump in 10 off a bump into thin air. measured over 703 clumps:
+	-- 2 = 68 floating, 1 = 14, 0.5 = 2, and none buried at any of them
+	oreOffset = 0.5,
 	lantern = { color = Color3.fromRGB(255, 206, 158), brightness = 1.6, range = 36 },
 	glowwormChance = 0.3, -- per cavern ceiling voxel. tiny blue lights and hanging threads
 	glowwormColor = Color3.fromRGB(120, 205, 255),
@@ -646,160 +649,41 @@ end
 
 -- ============================================================ meshes
 --[[
-	props built as real meshes from code (EditableMesh): a handful of shapes made once, then cloned
-	with a random size and turn. roblox caps how much code-built mesh a game can hold, so it's a
-	small library rather than a new mesh per prop. if meshes aren't allowed, props go back to blocks
+	the prop shapes live in ReplicatedStorage.CaveMeshes so players' computers can build them too.
+	meshes built on the server never reach players (they get checker boxes), so while the game runs
+	the server only places plain stand-in blocks tagged with which shape they are, and each player's
+	Props script swaps in the real mesh. in edit mode there's no player, so Studio builds them here
 ]]
+local CaveMeshes = require(ReplicatedStorage:WaitForChild("CaveMeshes"))
 
-local meshLib: { [string]: { MeshPart } }? = nil
-local meshTried = false
-local meshBuilding = false
-local meshKeep: { any } = {} -- the EditableMeshes stay referenced so their geometry isn't freed
-
--- every triangle gets its own corners so the faces come out flat, which suits the stylized rock.
--- flipped if it faces inwards, or it'd be invisible from outside
-local function addTri(em: any, a: Vector3, b: Vector3, c: Vector3, inside: Vector3)
-	local n = (b - a):Cross(c - a)
-	if n.Magnitude < 1e-6 then
-		return
+local function buildMeshLib()
+	if RunService:IsRunning() then
+		return nil
 	end
-	if n:Dot((a + b + c) / 3 - inside) < 0 then
-		b, c = c, b
-	end
-	em:AddTriangle(em:AddVertex(a), em:AddVertex(b), em:AddVertex(c))
-end
-
--- a wobbly cone, root at y = 0, tip at y = -1
-local function spikeShape(em: any, rng: Random)
-	local sides, rings = rng:NextInteger(6, 8), 4
-	local ring = {}
-	for r = 0, rings - 1 do
-		local t = r / rings
-		local verts = {}
-		for i = 0, sides - 1 do
-			local a = i / sides * math.pi * 2 + r * 0.35 + rng:NextNumber(-0.15, 0.15)
-			local rr = 0.22 * (1 - t * 0.85) * rng:NextNumber(0.8, 1.2)
-			table.insert(verts, Vector3.new(math.cos(a) * rr, -t, math.sin(a) * rr))
-		end
-		table.insert(ring, verts)
-	end
-	local tip = Vector3.new(rng:NextNumber(-0.02, 0.02), -1, rng:NextNumber(-0.02, 0.02))
-	for r = 1, rings - 1 do
-		local a, b = ring[r], ring[r + 1]
-		local inside = Vector3.new(0, -(r - 0.5) / rings, 0)
-		for i = 1, sides do
-			local j = i % sides + 1
-			addTri(em, a[i], b[i], b[j], inside)
-			addTri(em, a[i], b[j], a[j], inside)
-		end
-	end
-	local last = ring[rings]
-	for i = 1, sides do
-		addTri(em, last[i], tip, last[i % sides + 1], Vector3.new(0, -0.85, 0))
-	end
-	local top = ring[1]
-	for i = 2, sides - 1 do
-		addTri(em, top[1], top[i], top[i + 1], Vector3.new(0, -0.5, 0))
-	end
-end
-
--- a six-sided shard, base at y = 0, point at y = 1
-local function crystalShape(em: any, rng: Random)
-	local sides = 6
-	local r0 = 0.2 * rng:NextNumber(0.85, 1.15)
-	local twist = rng:NextNumber(0, math.pi)
-	local bottom, top = {}, {}
-	for i = 0, sides - 1 do
-		local a = i / sides * math.pi * 2 + twist
-		table.insert(bottom, Vector3.new(math.cos(a) * r0, 0, math.sin(a) * r0))
-		table.insert(top, Vector3.new(math.cos(a) * r0 * 0.9, 0.72, math.sin(a) * r0 * 0.9))
-	end
-	local tip = Vector3.new(rng:NextNumber(-0.03, 0.03), 1, rng:NextNumber(-0.03, 0.03))
-	for i = 1, sides do
-		local j = i % sides + 1
-		addTri(em, bottom[i], top[i], top[j], Vector3.new(0, 0.36, 0))
-		addTri(em, bottom[i], top[j], bottom[j], Vector3.new(0, 0.36, 0))
-		addTri(em, top[i], tip, top[j], Vector3.new(0, 0.8, 0))
-	end
-	for i = 2, sides - 1 do
-		addTri(em, bottom[1], bottom[i], bottom[i + 1], Vector3.new(0, 0.3, 0))
-	end
-end
-
--- a lumpy rock around the origin, about 1 stud across
-local function lumpShape(em: any, rng: Random)
-	local lat, lon = 5, 7
-	local off = rng:NextNumber(0, 100)
-	local pts = {}
-	for u = 0, lat do
-		pts[u] = {}
-		for v = 0, lon do
-			local theta = u / lat * math.pi
-			local phi = (v % lon) / lon * math.pi * 2
-			local dir = Vector3.new(math.sin(theta) * math.cos(phi), math.cos(theta), math.sin(theta) * math.sin(phi))
-			pts[u][v] = dir * 0.5 * (1 + math.noise(dir.X * 1.7 + off, dir.Y * 1.7, dir.Z * 1.7) * 0.6)
-		end
-	end
-	for u = 0, lat - 1 do
-		for v = 0, lon - 1 do
-			local a, b, c, d = pts[u][v], pts[u + 1][v], pts[u + 1][v + 1], pts[u][v + 1]
-			addTri(em, a, b, c, Vector3.zero)
-			addTri(em, a, c, d, Vector3.zero)
-		end
-	end
-end
-
-local function meshPart(shape: (any, Random) -> (), rng: Random): MeshPart
-	local AssetService = game:GetService("AssetService")
-	local em = AssetService:CreateEditableMesh()
-	shape(em, rng)
-	table.insert(meshKeep, em)
-	local part = AssetService:CreateMeshPartAsync(Content.fromObject(em))
-	part.Anchored = true
-	part.CanCollide = false
-	part.CanTouch = false
-	return part
-end
-
-local function buildMeshLib(): { [string]: { MeshPart } }?
-	while meshBuilding do
-		task.wait()
-	end
-	if meshTried then
-		return meshLib
-	end
-	meshTried = true
-	meshBuilding = true
-	local ok, err = pcall(function()
-		local rng = Random.new(4242)
-		local lib = { spike = {}, crystal = {}, lump = {} }
-		for _ = 1, 6 do
-			table.insert(lib.spike, meshPart(spikeShape, rng))
-		end
-		for _ = 1, 4 do
-			table.insert(lib.crystal, meshPart(crystalShape, rng))
-		end
-		for _ = 1, 8 do
-			table.insert(lib.lump, meshPart(lumpShape, rng))
-		end
-		meshLib = lib
-	end)
-	meshBuilding = false
-	if not ok then
-		warn("cave: couldn't build meshes, props fall back to blocks:", err)
-	end
-	return meshLib
+	return CaveMeshes.build()
 end
 Cave.buildMeshLib = buildMeshLib
 
--- a copy of one of the library shapes, or nil if meshes aren't available
-local function newMesh(kind: string, rng: Random): MeshPart?
-	local lib = buildMeshLib()
-	local list = lib and lib[kind]
-	if not list or #list == 0 then
+-- a stand-in block tagged with a shape (while the game runs), or the real mesh (in edit mode).
+-- nil only if meshes aren't available in edit mode
+local function newMesh(kind: string, rng: Random): BasePart?
+	local count = CaveMeshes.counts[kind]
+	if not count then
 		return nil
 	end
-	return list[rng:NextInteger(1, #list)]:Clone()
+	local index = rng:NextInteger(1, count)
+	if RunService:IsRunning() then
+		local stand = Instance.new("Part")
+		stand:SetAttribute("MeshKind", kind)
+		stand:SetAttribute("MeshIndex", index)
+		return stand
+	end
+	local lib = CaveMeshes.build()
+	local list = lib and lib[kind]
+	if not list then
+		return nil
+	end
+	return list[index]:Clone()
 end
 
 local function pickOre(depth: number, rng: Random)
