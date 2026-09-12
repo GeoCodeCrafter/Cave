@@ -60,6 +60,17 @@ local function swingAnimation(t: Tool)
 	end)
 end
 
+-- F (or the button on mobile) throws a flare the way you're looking
+local ContextActionService = game:GetService("ContextActionService")
+local flare = ReplicatedStorage:WaitForChild("CaveFlare") :: RemoteEvent
+ContextActionService:BindAction("ThrowFlare", function(_, state)
+	if state == Enum.UserInputState.Begin then
+		flare:FireServer(workspace.CurrentCamera.CFrame.LookVector)
+	end
+	return Enum.ContextActionResult.Sink
+end, true, Enum.KeyCode.F, Enum.KeyCode.ButtonX)
+ContextActionService:SetTitle("ThrowFlare", "flare")
+
 while true do
 	task.wait(SWING_EVERY)
 	local t = tool

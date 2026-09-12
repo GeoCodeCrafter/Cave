@@ -94,6 +94,11 @@ Cave.settings = {
 	lightDistance = 110, -- lights further than this from every player switch off
 	oreOffset = 2, -- studs to push ore out of the wall. roblox draws the wall further into the tunnel than the maths says, Cave.measure() tells you the real number
 	lantern = { color = Color3.fromRGB(255, 206, 158), brightness = 1.6, range = 36 },
+	glowwormChance = 0.3, -- per cavern ceiling voxel. tiny blue lights and hanging threads
+	glowwormColor = Color3.fromRGB(120, 205, 255),
+	dark = true, -- pitch black away from lights, your helmet lamp does the rest
+	lamp = { range = 45, angle = 60, brightness = 2.4, color = Color3.fromRGB(255, 236, 205) },
+	flare = { cooldown = 1.5, burn = 20, maxEach = 5, speed = 55, color = Color3.fromRGB(255, 90, 60) },
 	oreGlow = {
 		Gold = Color3.fromRGB(255, 196, 80),
 		Diamond = Color3.fromRGB(120, 235, 255),
@@ -466,6 +471,15 @@ function Cave.applyLighting()
 	Lighting.EnvironmentSpecularScale = 0.5
 	Lighting.GlobalShadows = true
 
+	-- properly dark underground, so the lanterns, crystals and your lamp actually matter
+	if Cave.settings.dark then
+		Lighting.Ambient = Color3.fromRGB(6, 6, 7)
+		Lighting.OutdoorAmbient = Color3.fromRGB(4, 4, 5)
+		Lighting.Brightness = 0
+		Lighting.EnvironmentDiffuseScale = 0.03
+		Lighting.EnvironmentSpecularScale = 0.3
+	end
+
 	-- still, clear water so you can see what's at the bottom of the pools
 	terrain.WaterColor = Color3.fromRGB(34, 120, 130)
 	terrain.WaterTransparency = 0.85
@@ -743,6 +757,71 @@ local function placeTidePool(floor: Vector3, rng: Random)
 	light.Shadows = false
 	light.Parent = model:FindFirstChild("Anemone")
 
+	keep(model, "Decor")
+end
+
+local function inCavern(p: Vector3): boolean
+	local f = featuresFor(math.floor(p.X / SIZE), math.floor(p.Y / SIZE), math.floor(p.Z / SIZE))
+	local q = warp(p)
+	for _, c in f.caverns do
+		local d = q - c.c
+		if Vector3.new(d.X, d.Y / c.flat, d.Z).Magnitude < c.r + 6 then
+			return true
+		end
+	end
+	return false
+end
+
+-- a patch of glowworms on a ceiling: tiny blue dots, and a couple of the sticky threads they hang
+local function placeGlowworms(ceiling: Vector3, rng: Random)
+	local color = Cave.settings.glowwormColor
+	local model = Instance.new("Model")
+	model.Name = "Glowworms"
+
+	local function glow(size: number, at: Vector3)
+		local dot = Instance.new("Part")
+		dot.Name = "Glow"
+		dot.Shape = Enum.PartType.Ball
+		dot.Anchored = true
+		dot.CanCollide = false
+		dot.CanQuery = false
+		dot.CastShadow = false
+		dot.Material = Enum.Material.Neon
+		dot.Color = color
+		dot.Size = Vector3.one * size
+		dot.CFrame = CFrame.new(at)
+		dot.Parent = model
+	end
+
+	for _ = 1, rng:NextInteger(4, 8) do
+		glow(rng:NextNumber(0.12, 0.28), ceiling + Vector3.new(rng:NextNumber(-2, 2), -0.2, rng:NextNumber(-2, 2)))
+	end
+	for _ = 1, rng:NextInteger(0, 2) do
+		local len = rng:NextNumber(1, 3.5)
+		local at = ceiling + Vector3.new(rng:NextNumber(-1.8, 1.8), 0, rng:NextNumber(-1.8, 1.8))
+		local thread = Instance.new("Part")
+		thread.Name = "Thread"
+		thread.Anchored = true
+		thread.CanCollide = false
+		thread.CanQuery = false
+		thread.CastShadow = false
+		thread.Material = Enum.Material.SmoothPlastic
+		thread.Color = color:Lerp(Color3.new(1, 1, 1), 0.5)
+		thread.Transparency = 0.55
+		thread.Size = Vector3.new(0.04, len, 0.04)
+		thread.CFrame = CFrame.new(at - Vector3.new(0, len / 2, 0))
+		thread.Parent = model
+		glow(0.18, at - Vector3.new(0, len, 0))
+	end
+
+	if rng:NextNumber() < 0.06 then
+		local light = Instance.new("PointLight")
+		light.Color = color
+		light.Range = 18
+		light.Brightness = 0.8
+		light.Shadows = false
+		light.Parent = model:FindFirstChild("Glow")
+	end
 	keep(model, "Decor")
 end
 
@@ -1065,6 +1144,13 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 		for y = 2, CHUNK - 1 do
 			for z = 2, CHUNK - 1 do
 				if not air[x][y][z] then
+					-- glowworms, but only on cavern ceilings where there's a big roof to look up at
+					if air[x][y - 1][z] and rng:NextNumber() < s.glowwormChance then
+						local cp = min + Vector3.new(x - 0.5, y - 0.5, z - 0.5) * VOXEL
+						if inCavern(cp) then
+							placeGlowworms((wallBetween(cp, -Vector3.yAxis)), rng)
+						end
+					end
 					local open: Vector3? = nil
 					for _, d in DIRS do
 						if air[x + d.X][y + d.Y][z + d.Z] then
@@ -1489,7 +1575,7 @@ function Cave.buildSpawnRoom(center: Vector3?): CFrame
 	label.Font = Enum.Font.SourceSansBold
 	label.TextScaled = true
 	label.TextColor3 = Color3.fromRGB(250, 236, 205)
-	label.Text = "hold click with the pickaxe\nto mine ore and dig rock\n\nfollow the lanterns out"
+	label.Text = "hold click with the pickaxe\nto mine ore and dig rock\nF to throw a flare\n\nfollow the lanterns out"
 	label.Parent = gui
 	gui.Parent = sign
 
@@ -2089,6 +2175,135 @@ function Cave.enablePickaxe()
 	end
 end
 
+-- ============================================================ helmet lamp and flares
+
+local function giveLamp(character: Model)
+	local head = character:WaitForChild("Head", 5) :: BasePart?
+	if not head or head:FindFirstChild("HelmetLamp") then
+		return
+	end
+	local l = Cave.settings.lamp
+	local beam = Instance.new("SpotLight")
+	beam.Name = "HelmetLamp"
+	beam.Face = Enum.NormalId.Front
+	beam.Range = l.range
+	beam.Angle = l.angle
+	beam.Brightness = l.brightness
+	beam.Color = l.color
+	beam.Shadows = true
+	beam.Parent = head
+	-- a little spill so your own feet aren't in the dark
+	local spill = Instance.new("PointLight")
+	spill.Name = "LampSpill"
+	spill.Range = 9
+	spill.Brightness = 0.5
+	spill.Color = l.color
+	spill.Shadows = false
+	spill.Parent = head
+end
+
+function Cave.enableLamps()
+	local function hook(player: Player)
+		player.CharacterAdded:Connect(giveLamp)
+		if player.Character then
+			task.spawn(giveLamp, player.Character)
+		end
+	end
+	for _, player in Players:GetPlayers() do
+		hook(player)
+	end
+	Players.PlayerAdded:Connect(hook)
+end
+
+local lastFlare: { [Player]: number } = {}
+local liveFlares: { [Player]: { BasePart } } = {}
+
+local function throwFlare(player: Player, dir: Vector3)
+	local f = Cave.settings.flare
+	local now = os.clock()
+	if now - (lastFlare[player] or 0) < f.cooldown then
+		return
+	end
+	local head = player.Character and player.Character:FindFirstChild("Head") :: BasePart?
+	if not head or dir.Magnitude < 0.01 or dir.Magnitude > 2 then
+		return
+	end
+	lastFlare[player] = now
+	dir = dir.Unit
+
+	-- only so many burning at once, the oldest goes out
+	local mine = liveFlares[player] or {}
+	liveFlares[player] = mine
+	while #mine >= f.maxEach do
+		local old = table.remove(mine, 1)
+		if old then
+			old:Destroy()
+		end
+	end
+
+	local flare = Instance.new("Part")
+	flare.Name = "Flare"
+	flare.Size = Vector3.new(0.35, 0.35, 1.2)
+	flare.Material = Enum.Material.Neon
+	flare.Color = f.color
+	flare.CFrame = CFrame.lookAt(head.Position + dir * 2, head.Position + dir * 3)
+	flare.AssemblyLinearVelocity = dir * f.speed + Vector3.new(0, 12, 0)
+	flare.AssemblyAngularVelocity = Vector3.new(math.random() * 10 - 5, math.random() * 10 - 5, math.random() * 10 - 5)
+
+	local light = Instance.new("PointLight")
+	light.Color = f.color
+	light.Range = 32
+	light.Brightness = 3
+	light.Shadows = true
+	light.Parent = flare
+
+	local sparks = Instance.new("ParticleEmitter")
+	sparks.Color = ColorSequence.new(f.color, Color3.fromRGB(255, 220, 120))
+	sparks.Size = NumberSequence.new(0.25, 0)
+	sparks.Speed = NumberRange.new(3, 8)
+	sparks.SpreadAngle = Vector2.new(180, 180)
+	sparks.Lifetime = NumberRange.new(0.3, 0.6)
+	sparks.Rate = 40
+	sparks.LightEmission = 1
+	sparks.Acceleration = Vector3.new(0, -20, 0)
+	sparks.Parent = flare
+
+	flare.Parent = Workspace
+	-- the server moves it, so everyone sees the same bounce
+	flare:SetNetworkOwner(nil)
+	table.insert(mine, flare)
+
+	task.delay(f.burn - 3, function()
+		if flare.Parent then
+			sparks.Enabled = false
+			TweenService:Create(light, TweenInfo.new(3), { Brightness = 0 }):Play()
+		end
+	end)
+	Debris:AddItem(flare, f.burn)
+end
+
+function Cave.enableFlares()
+	local remote = ReplicatedStorage:FindFirstChild("CaveFlare") :: RemoteEvent?
+	if not remote then
+		local created = Instance.new("RemoteEvent")
+		created.Name = "CaveFlare"
+		created.Parent = ReplicatedStorage
+		remote = created
+	end
+	(remote :: RemoteEvent).OnServerEvent:Connect(function(player, dir)
+		if typeof(dir) == "Vector3" then
+			throwFlare(player, dir)
+		end
+	end)
+	Players.PlayerRemoving:Connect(function(player)
+		lastFlare[player] = nil
+		for _, flare in liveFlares[player] or {} do
+			flare:Destroy()
+		end
+		liveFlares[player] = nil
+	end)
+end
+
 -- the seed in the bottom corner, so people can share a mine they liked
 function Cave.showSeed()
 	local StarterGui = game:GetService("StarterGui")
@@ -2118,6 +2333,8 @@ function Cave.start()
 	Cave.applyColors()
 	Cave.applyLighting()
 	Cave.showSeed()
+	Cave.enableLamps()
+	Cave.enableFlares()
 	Cave.enableMining()
 	Cave.enableDigging()
 	Cave.enablePickaxe()
