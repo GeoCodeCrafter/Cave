@@ -90,13 +90,20 @@ Cave.settings = {
 		-- tide pool biome
 		[Enum.Material.Cobblestone] = Color3.fromRGB(92, 90, 86),
 		[Enum.Material.Sand] = Color3.fromRGB(150, 140, 118),
+		-- flowstone: the pale mineral crust left by dripping water
+		[Enum.Material.Snow] = Color3.fromRGB(190, 176, 150),
+	},
+	-- water that collects in the dips in the floor, and the mineral it leaves behind
+	pools = {
+		maxCells = 40, -- bigger than this and it's not a dip, it's a flat floor with a gap in it
+		flowstone = Enum.Material.Snow,
+		streaks = 0.42, -- higher = fewer mineral streaks down the walls
 	},
 	-- plain rock areas only, chances per ceiling/floor voxel
 	decor = {
 		stalactiteChance = 0.05,
 		stalagmiteChance = 0.015,
 		rubbleChance = 0.03,
-		puddleChance = 0.006,
 	},
 	-- big regions of the mine. above crystalAbove = crystal caves, below mushroomBelow = mushroom caves
 	biomes = {
@@ -165,6 +172,7 @@ local done: { [string]: boolean } = {}
 local featureCache: { [string]: any } = {}
 
 Cave.placed = 0
+Cave.pools = 0
 Cave.bridges = 0
 
 local function getFolder(name: string): Folder
@@ -947,6 +955,10 @@ local function materialAt(p: Vector3, isFloor: boolean): Enum.Material
 	if isFloor and p.Y > s.layers[#s.layers].at then
 		return s.floor
 	end
+	-- mineral streaks: noise stretched tall and thin, so it runs down the walls like drip stains
+	if not isFloor and math.noise(p.X * 0.2 + o, p.Y * 0.015, p.Z * 0.2 - o) > s.pools.streaks then
+		return s.pools.flowstone
+	end
 	if math.noise(p.X * 0.05 + o, p.Y * 0.08, p.Z * 0.05) > 0.32 then
 		return s.patch
 	end
@@ -1486,11 +1498,6 @@ local function placeRubble(floor: Vector3, color: Color3, rng: Random)
 		part.Parent = model
 	end
 	keep(model, "Decor")
-end
-
--- sinks a shallow disc of real terrain water into the floor
-local function placePuddle(floor: Vector3, rng: Random)
-	terrain:FillCylinder(CFrame.new(floor - Vector3.new(0, 0.8, 0)), 2, rng:NextNumber(3, 6), Enum.Material.Water)
 end
 
 -- a lantern hanging on a chain from the ceiling above a node. nodes are always open space
@@ -2167,6 +2174,65 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 		end
 	end
 
+	-- pools: water settles in the dips in the floor. start from any open cell with rock under it and
+	-- spread sideways over the floor at that height. if it reaches a drop, the chunk edge or river
+	-- water, or gets too big, it would run away, so it stays dry. only a dip walled in on every
+	-- side fills up. the rock round it gets a flowstone rim, the crust real pools leave
+	local pooled: { [number]: boolean } = {}
+	local function pid(x: number, y: number, z: number): number
+		return x + (y - 1) * CHUNK + (z - 1) * CHUNK * CHUNK
+	end
+	local SIDES = { Vector3.new(1, 0, 0), Vector3.new(-1, 0, 0), Vector3.new(0, 0, 1), Vector3.new(0, 0, -1) }
+	for y = 2, CHUNK do
+		for x = 1, CHUNK do
+			for z = 1, CHUNK do
+				if air[x][y][z] and not air[x][y - 1][z] and not pooled[pid(x, y, z)]
+					and materials[x][y][z] ~= Enum.Material.Water
+				then
+					local start = min + Vector3.new(x - 0.5, y - 0.5, z - 0.5) * VOXEL
+					local cells, walls, stack = {}, {}, { Vector3.new(x, y, z) }
+					local leaks = start.Y < s.lavaBelow or tubeClearance(start) > -3
+					pooled[pid(x, y, z)] = true
+					while #stack > 0 do
+						local c = table.remove(stack) :: Vector3
+						table.insert(cells, c)
+						for _, d in SIDES do
+							local n = c + d
+							if n.X < 1 or n.Z < 1 or n.X > CHUNK or n.Z > CHUNK then
+								leaks = true
+							elseif not air[n.X][y][n.Z] then
+								table.insert(walls, n)
+							elseif materials[n.X][y][n.Z] == Enum.Material.Water or air[n.X][y - 1][n.Z] then
+								leaks = true
+							elseif not pooled[pid(n.X, y, n.Z)] then
+								pooled[pid(n.X, y, n.Z)] = true
+								table.insert(stack, n)
+							end
+						end
+						if #cells > s.pools.maxCells then
+							leaks = true
+						end
+					end
+					if not leaks then
+						Cave.pools += 1
+						for _, c in cells do
+							materials[c.X][y][c.Z] = Enum.Material.Water
+							occupancy[c.X][y][c.Z] = 1
+						end
+						if biomeAt(start) == "rock" then
+							for _, c in cells do
+								materials[c.X][y - 1][c.Z] = s.pools.flowstone
+							end
+							for _, w in walls do
+								materials[w.X][y][w.Z] = s.pools.flowstone
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
 	terrain:WriteVoxels(Region3.new(min, min + Vector3.one * SIZE), VOXEL, materials, occupancy)
 
 	-- put back any digging that happened here before the chunk was unloaded
@@ -2308,9 +2374,6 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 								elseif roll < d.stalagmiteChance + d.rubbleChance then
 									local wall = wallBetween(p, open)
 									placeRubble(wall, rockColor(p), rng)
-								elseif roll < d.stalagmiteChance + d.rubbleChance + d.puddleChance then
-									local wall = wallBetween(p, open)
-									placePuddle(wall, rng)
 								end
 							end
 						end
@@ -2979,6 +3042,7 @@ function Cave.clear()
 	table.clear(featureCache)
 	table.clear(layoutCache)
 	Cave.placed = 0
+	Cave.pools = 0
 	Cave.bridges = 0
 end
 
