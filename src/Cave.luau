@@ -51,6 +51,10 @@ Cave.settings = {
 	tubeCell = 352, -- studs, at most one tube per cell this size
 	tubeChance = 0.5,
 	tubeRadius = 8,
+	-- geodes: hollow crystal-lined balls sealed in solid rock, you have to dig to find them
+	geodeCell = 160, -- studs, at most one geode per cube this size
+	geodeChance = 0.35,
+	geodeRadius = 8,
 	southChance = 0.6, -- east links are always there, south ones only sometimes, so it's less of a grid
 	diagChance = 0.25,
 	rampChance = 0.45, -- per node, a sloped tunnel down to the level below
@@ -678,6 +682,84 @@ local function airness(p: Vector3): number
 		return tube + rough * 0.15
 	end
 	return best + rough + shelf
+end
+
+-- ============================================================ geodes
+--[[
+	hollow balls lined with crystals, sealed inside solid rock so you have to dig to find them. the
+	one thing in the mine that deliberately doesn't connect. only placed where the whole ball and a
+	shell round it is rock, and a few sparkles on the nearest tunnel wall give it away
+]]
+
+local geodeCache: { [string]: any } = {}
+
+local function geodeForCell(gx: number, gy: number, gz: number)
+	local s = Cave.settings
+	local key = s.seed .. ":" .. gx .. "," .. gy .. "," .. gz
+	local cached = geodeCache[key]
+	if cached ~= nil then
+		return if cached then cached else nil
+	end
+	local found = nil
+	local cell = s.geodeCell
+	if hash(gx, gy, gz, 110) < s.geodeChance then
+		local c = Vector3.new(
+			(gx + 0.25 + hash(gx, gy, gz, 111) * 0.5) * cell,
+			(gy + 0.25 + hash(gx, gy, gz, 112) * 0.5) * cell,
+			(gz + 0.25 + hash(gx, gy, gz, 113) * 0.5) * cell
+		)
+		local r = s.geodeRadius * (0.85 + hash(gx, gy, gz, 114) * 0.35)
+		if c.Y < s.top - r - 20 then
+			-- sealed: the middle and 26 points round a shell 4 studs out all have to be solid rock
+			local sealed = airness(c) < -1
+			for dx = -1, 1 do
+				for dy = -1, 1 do
+					for dz = -1, 1 do
+						if sealed and (dx ~= 0 or dy ~= 0 or dz ~= 0) then
+							if airness(c + Vector3.new(dx, dy, dz).Unit * (r + 4)) > -1 then
+								sealed = false
+							end
+						end
+					end
+				end
+			end
+			if sealed then
+				local palette = {
+					Color3.fromRGB(170, 90, 255), -- amethyst
+					Color3.fromRGB(255, 200, 70), -- citrine
+					Color3.fromRGB(80, 225, 255), -- aqua
+					Color3.fromRGB(255, 105, 180), -- rose
+				}
+				found = { c = c, r = r, color = palette[1 + math.floor(hash(gx, gy, gz, 115) * #palette)] }
+			end
+		end
+	end
+	geodeCache[key] = found or false
+	return found
+end
+
+-- every geode whose ball and shell reach into this chunk
+local function geodesNear(min: Vector3): { any }
+	local cell = Cave.settings.geodeCell
+	local reach = 16
+	local list = {}
+	for gx = math.floor((min.X - reach) / cell), math.floor((min.X + SIZE + reach) / cell) do
+		for gy = math.floor((min.Y - reach) / cell), math.floor((min.Y + SIZE + reach) / cell) do
+			for gz = math.floor((min.Z - reach) / cell), math.floor((min.Z + SIZE + reach) / cell) do
+				local g = geodeForCell(gx, gy, gz)
+				if g then
+					local near = g.r + 3
+					if g.c.X + near >= min.X and g.c.X - near <= min.X + SIZE
+						and g.c.Y + near >= min.Y and g.c.Y - near <= min.Y + SIZE
+						and g.c.Z + near >= min.Z and g.c.Z - near <= min.Z + SIZE
+					then
+						table.insert(list, g)
+					end
+				end
+			end
+		end
+	end
+	return list
 end
 
 -- ============================================================ materials
@@ -1404,6 +1486,103 @@ local function placeBridge(center: Vector3, dir: Vector3)
 	Cave.bridges += 1
 end
 
+-- the inside of a geode: glowing crystals all over the inner wall pointing in, a light in the middle,
+-- and a few sparkles on the nearest tunnel wall as the only clue. built by the chunk its centre is in
+local function placeGeode(g, min: Vector3)
+	local c = g.c
+	local mine = c.X >= min.X and c.X < min.X + SIZE and c.Y >= min.Y and c.Y < min.Y + SIZE and c.Z >= min.Z and c.Z < min.Z + SIZE
+	if not mine then
+		return
+	end
+	local rng = Random.new(math.floor(c.X * 7 + c.Y * 13 + c.Z * 17))
+	local model = Instance.new("Model")
+	model.Name = "Geode"
+	local n = 70
+	for i = 0, n - 1 do
+		-- points spread evenly over the inside of the ball
+		local yv = 1 - (i + 0.5) / n * 2
+		local ring = math.sqrt(1 - yv * yv)
+		local phi = i * 2.399963
+		local out = Vector3.new(math.cos(phi) * ring, yv, math.sin(phi) * ring)
+		local inward = (-out + Vector3.new(rng:NextNumber(-0.25, 0.25), rng:NextNumber(-0.25, 0.25), rng:NextNumber(-0.25, 0.25))).Unit
+		local len = rng:NextNumber(1.5, 3.5)
+		local width = rng:NextNumber(0.5, 1)
+		local base = c + out * (g.r - 0.8)
+		local shard = newMesh("crystal", rng)
+		local part: BasePart = shard or Instance.new("Part")
+		part.Name = "Shard"
+		part.Anchored = true
+		part.CanCollide = false
+		part.CastShadow = false
+		part.Material = Enum.Material.Neon
+		part.Color = g.color:Lerp(Color3.new(1, 1, 1), rng:NextNumber(0, 0.25))
+		part.Transparency = 0.1
+		if shard then
+			part.Size = Vector3.new(width, len, width)
+			part.CFrame = safeLookAt(base + inward * len / 2, inward) * CFrame.Angles(-math.pi / 2, 0, 0)
+		else
+			part.Size = Vector3.new(width, width, len)
+			part.CFrame = safeLookAt(base + inward * len / 2, inward)
+		end
+		part.Parent = model
+	end
+	local core = Instance.new("Part")
+	core.Name = "Core"
+	core.Anchored = true
+	core.CanCollide = false
+	core.CanQuery = false
+	core.Transparency = 1
+	core.Size = Vector3.one
+	core.CFrame = CFrame.new(c)
+	local light = Instance.new("PointLight")
+	light.Color = g.color
+	light.Range = g.r * 2.5
+	light.Brightness = 1.5
+	light.Shadows = false
+	light.Parent = core
+	core.Parent = model
+	keep(model, "Decor")
+
+	-- the clue: find the nearest tunnel wall in any of the six directions and make it sparkle a bit
+	local clue, closest = nil, math.huge
+	for _, d in { Vector3.xAxis, -Vector3.xAxis, Vector3.yAxis, -Vector3.yAxis, Vector3.zAxis, -Vector3.zAxis } do
+		for step = g.r + 3, g.r + 20 do
+			if airness(c + d * step) > 0 then
+				if step < closest then
+					closest = step
+					clue = c + d * (step - 0.5)
+				end
+				break
+			end
+		end
+	end
+	if clue then
+		local hint = Instance.new("Model")
+		hint.Name = "GeodeSparkle"
+		local spot = Instance.new("Part")
+		spot.Name = "Sparkle"
+		spot.Anchored = true
+		spot.CanCollide = false
+		spot.CanQuery = false
+		spot.Transparency = 1
+		spot.Size = Vector3.new(3, 3, 3)
+		spot.CFrame = CFrame.new(clue)
+		local sparkle = Instance.new("ParticleEmitter")
+		sparkle.Color = ColorSequence.new(g.color)
+		sparkle.Size = NumberSequence.new(0.15, 0)
+		sparkle.Transparency = NumberSequence.new(0, 1)
+		sparkle.Lifetime = NumberRange.new(1, 2)
+		sparkle.Speed = NumberRange.new(0.2, 0.6)
+		sparkle.SpreadAngle = Vector2.new(180, 180)
+		sparkle.Rate = 3
+		sparkle.LightEmission = 1
+		sparkle.Shape = Enum.ParticleEmitterShape.Box
+		sparkle.Parent = spot
+		spot.Parent = hint
+		keep(hint, "Decor")
+	end
+end
+
 -- an orange light on the floor of a lava tube every 18 studs or so, so the tube glows
 local function placeTubeGlow(tb, min: Vector3)
 	local pts = tubePath(tb)
@@ -1770,6 +1949,26 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 		end
 	end
 
+	-- geodes get hollowed out after the pocket cleanup, or it would fill them straight back in
+	local geodes = geodesNear(min)
+	for _, g in geodes do
+		for x = 1, CHUNK do
+			for y = 1, CHUNK do
+				for z = 1, CHUNK do
+					local p = min + Vector3.new(x - 0.5, y - 0.5, z - 0.5) * VOXEL
+					local d = (p - g.c).Magnitude
+					if d < g.r + 4 then
+						local occ = math.clamp(0.5 - (g.r - d) / VOXEL, 0, 1)
+						if occ < occupancy[x][y][z] then
+							occupancy[x][y][z] = occ
+							air[x][y][z] = occ < 0.5
+						end
+					end
+				end
+			end
+		end
+	end
+
 	for x = 1, CHUNK do
 		for y = 1, CHUNK do
 			for z = 1, CHUNK do
@@ -1779,6 +1978,22 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 					local p = min + Vector3.new(x - 0.5, y - 0.5, z - 0.5) * VOXEL
 					local isFloor = if y < CHUNK then air[x][y + 1][z] else false
 					materials[x][y][z] = materialAt(p, isFloor)
+				end
+			end
+		end
+	end
+
+	-- a geode's inner wall is violet crystal rock, a couple of studs thick
+	for _, g in geodes do
+		for x = 1, CHUNK do
+			for y = 1, CHUNK do
+				for z = 1, CHUNK do
+					if occupancy[x][y][z] > 0 then
+						local p = min + Vector3.new(x - 0.5, y - 0.5, z - 0.5) * VOXEL
+						if (p - g.c).Magnitude < g.r + 2.5 then
+							materials[x][y][z] = Enum.Material.Glacier
+						end
+					end
 				end
 			end
 		end
@@ -1867,6 +2082,9 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 	end
 	for _, tb in f.tubes do
 		placeTubeGlow(tb, min)
+	end
+	for _, g in geodes do
+		placeGeode(g, min)
 	end
 
 	-- crystal and mushroom caves light themselves, lanterns only in plain rock
@@ -2155,6 +2373,34 @@ function Cave.findChasm(near: Vector3?): Vector3?
 		end
 	end
 	warn("cave: no chasm found nearby, raise chasmChance or try another seed")
+	return nil
+end
+
+-- finds the nearest geode, builds around it and (in edit mode) puts the camera inside it
+function Cave.findGeode(near: Vector3?): Vector3?
+	local c = near or Vector3.new(0, -100, 0)
+	local cell = Cave.settings.geodeCell
+	local gx0, gy0, gz0 = math.floor(c.X / cell), math.floor(c.Y / cell), math.floor(c.Z / cell)
+	for r = 0, 4 do
+		for dx = -r, r do
+			for dy = -r, r do
+				for dz = -r, r do
+					if math.max(math.abs(dx), math.abs(dy), math.abs(dz)) == r then
+						local g = geodeForCell(gx0 + dx, gy0 + dy, gz0 + dz)
+						if g then
+							Cave.preview(g.c, 1)
+							if not RunService:IsRunning() then
+								Workspace.CurrentCamera.CFrame = CFrame.lookAt(g.c, g.c + Vector3.new(1, -0.3, 0.2))
+							end
+							print("cave: geode at", g.c)
+							return g.c
+						end
+					end
+				end
+			end
+		end
+	end
+	warn("cave: no geode found nearby, raise geodeChance or try another seed")
 	return nil
 end
 
