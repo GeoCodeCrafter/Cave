@@ -35,6 +35,8 @@ or by hand:
 3. `src/Pickaxe.client.luau` and `src/Atmosphere.client.luau` go in StarterPlayerScripts as LocalScripts
 4. set `Lighting.Technology` to Future
 
+the rock texture is [Stylized Rock PBR Material](https://create.roblox.com/store/asset/80312067078613) by Nezhull (public domain). insert it from the toolbox and put it in MaterialService as `CaveRock`, plus copies with their BaseMaterial set to Slate, Sandstone and Limestone called `CaveRock_Slate`, `CaveRock_Sandstone` and `CaveRock_Limestone`. without it you just get roblox's normal rock, nothing breaks.
+
 to keep ore counts between sessions, publish the place and turn on Studio Access to API Services (File → Experience Settings → Security).
 
 ## changing it

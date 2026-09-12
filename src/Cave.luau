@@ -101,6 +101,15 @@ Cave.settings = {
 	ledgeDepth = 1.2,
 	floorSquash = 1.7, -- how much flatter the floor is than the ceiling. 1 = round tubes
 	boulderChance = 0.012, -- per floor voxel, half-buried boulders
+	-- custom rock textures: base material name = MaterialVariant name (the variants live in
+	-- MaterialService). anything not listed keeps roblox's own look
+	textures = {
+		Rock = "CaveRock",
+		Slate = "CaveRock_Slate",
+		-- the top layers are sandstone and limestone, so without these you'd barely see it near spawn
+		Sandstone = "CaveRock_Sandstone",
+		Limestone = "CaveRock_Limestone",
+	} :: { [string]: string },
 	dark = true, -- pitch black away from lights, your helmet lamp does the rest
 	lamp = { range = 45, angle = 60, brightness = 2.4, color = Color3.fromRGB(255, 236, 205) },
 	flare = { cooldown = 1.5, burn = 20, maxEach = 5, speed = 55, color = Color3.fromRGB(255, 90, 60) },
@@ -463,6 +472,30 @@ end
 function Cave.applyColors()
 	for material, color in Cave.settings.colors do
 		terrain:SetMaterialColor(material, color)
+	end
+end
+
+-- swaps roblox's stock materials for the MaterialVariants named in settings.textures, terrain
+-- included. a missing variant gets a warning and the stock look, it never stops the mine building
+function Cave.applyTextures()
+	local MaterialService = game:GetService("MaterialService")
+	for baseName, variantName in Cave.settings.textures do
+		local ok, base = pcall(function()
+			return (Enum.Material :: any)[baseName]
+		end)
+		local variant = MaterialService:FindFirstChild(variantName, true)
+		if not ok or not base then
+			warn("cave: textures has an unknown material", baseName)
+		elseif not variant or not variant:IsA("MaterialVariant") then
+			warn("cave: no MaterialVariant called", variantName, "in MaterialService, keeping stock", baseName)
+		else
+			local set, err = pcall(function()
+				MaterialService:SetBaseMaterialOverride(base, variantName)
+			end)
+			if not set then
+				warn("cave: couldn't swap", baseName, "for", variantName, err)
+			end
+		end
 	end
 end
 
@@ -1395,6 +1428,7 @@ function Cave.preview(center: Vector3?, radius: number?): Vector3
 	local spot = Cave.findSpawn(center)
 	local r = radius or 2
 	Cave.applyColors()
+	Cave.applyTextures()
 	Cave.applyLighting()
 	local cx, cy, cz = math.floor(spot.X / SIZE), math.floor(spot.Y / SIZE), math.floor(spot.Z / SIZE)
 	for dy = -2, 1 do
@@ -2396,6 +2430,7 @@ end
 
 function Cave.start()
 	Cave.applyColors()
+	Cave.applyTextures()
 	Cave.applyLighting()
 	Cave.showSeed()
 
