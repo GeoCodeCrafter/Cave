@@ -55,6 +55,15 @@ Cave.settings = {
 	geodeCell = 160, -- studs, at most one geode per cube this size
 	geodeChance = 0.35,
 	geodeRadius = 8,
+	-- the surface: rolling hills over the top of the mine, with cave mouths coming out of them
+	surface = {
+		height = 16, -- average ground height above top
+		hills = 20, -- how far it rises and falls
+		entranceCell = 256, -- studs, at most one cave mouth per cell this size
+		entranceChance = 0.7,
+		entranceRadius = 7,
+		entranceRun = 110, -- studs sideways from the junction to the mouth. about a 25 degree walk
+	},
 	-- layout: each region of chunks gets a random tree of tunnels, then a few extra links on top
 	regionSize = 4, -- chunks per side
 	loopChance = 0.12, -- a link the tree didn't use gets dug anyway, which makes a loop
@@ -90,6 +99,8 @@ Cave.settings = {
 		-- tide pool biome
 		[Enum.Material.Cobblestone] = Color3.fromRGB(92, 90, 86),
 		[Enum.Material.Sand] = Color3.fromRGB(150, 140, 118),
+		-- the surface
+		[Enum.Material.Grass] = Color3.fromRGB(70, 96, 52),
 		-- flowstone: the pale mineral crust left by dripping water
 		[Enum.Material.Snow] = Color3.fromRGB(190, 176, 150),
 	},
@@ -253,6 +264,17 @@ local function nodeAt(cx: number, cy: number, cz: number): Vector3
 		cz + 0.1 + hash(cx, cy, cz, 3) * 0.8
 	) * SIZE
 end
+
+-- how high the ground is here. two layers of hills plus a little lumpiness, never less than 6 studs
+-- above the top of the mine so there's always a roof over the first level
+local function surfaceHeight(x: number, z: number): number
+	local s = Cave.settings
+	local o = s.seed * 5.31
+	local hills = math.noise(x * 0.004 + 0.5, o, z * 0.004 + 0.5) * 0.7 + math.noise(x * 0.011 + o, 0.5, z * 0.011) * 0.3
+	local h = s.surface.height + hills * s.surface.hills * 1.6 + math.noise(x * 0.04, o + 3.7, z * 0.04) * 2
+	return s.top + math.max(6, h)
+end
+Cave.surfaceHeight = surfaceHeight
 
 -- links go from a node to one of these: east, south, diagonal, ramp down east, ramp down south
 local STEP = {
@@ -434,7 +456,7 @@ local function shaftForCell(gx: number, gz: number)
 	return {
 		c = Vector2.new(node.X, node.Z),
 		r = s.shaftRadius * (0.8 + hash(gx, 9999, gz, 83) * 0.4),
-		top = s.top - 2,
+		top = surfaceHeight(node.X, node.Z) + 2,
 		bottom = node.Y - s.shaftDepth * (0.75 + hash(gx, 9999, gz, 84) * 0.5),
 		spin = hash(gx, 9999, gz, 85) * math.pi * 2,
 		dir = if hash(gx, 9999, gz, 86) < 0.5 then 1 else -1,
@@ -721,6 +743,73 @@ local function tubeClearance(p: Vector3): number
 end
 
 -- studs of clearance: > 0 is air, < 0 is rock, 0 is the wall
+-- cave mouths: a straight sloping tunnel from a junction on the top level up to the lowest bit of
+-- ground nearby, so it comes out of a hillside instead of the top of a hill. real space, not bent,
+-- like the shafts, so it lines up with the surface
+local entranceCache: { [string]: any } = {}
+
+local function entranceForCell(gx: number, gz: number)
+	local s = Cave.settings
+	local e = s.surface
+	local key = s.seed .. ":" .. gx .. "," .. gz
+	local cached = entranceCache[key]
+	if cached ~= nil then
+		return if cached then cached else nil
+	end
+	local found = nil
+	local cy = math.floor(s.top / SIZE) - 1
+	if hash(gx, 5555, gz, 120) < e.entranceChance and hasNode(cy) then
+		local cell = e.entranceCell
+		local cx = math.floor((gx + 0.3 + hash(gx, 5555, gz, 121) * 0.4) * cell / SIZE)
+		local cz = math.floor((gz + 0.3 + hash(gx, 5555, gz, 122) * 0.4) * cell / SIZE)
+		local a = unwarp(nodeAt(cx, cy, cz))
+		local out, low = Vector3.xAxis, math.huge
+		for i = 0, 7 do
+			local angle = (i + hash(gx, 5555, gz, 123)) * math.pi / 4
+			local d = Vector3.new(math.cos(angle), 0, math.sin(angle))
+			local b = a + d * e.entranceRun
+			local h = surfaceHeight(b.X, b.Z)
+			if h < low then
+				out, low = d, h
+			end
+		end
+		local mouth = Vector3.new(a.X, 0, a.Z) + out * e.entranceRun + Vector3.new(0, low + 1, 0)
+		-- carry on a bit past the mouth so it opens right up instead of ending in a round cap
+		local b = mouth + out * 12
+		found = { a = a, b = b, mouth = mouth, out = out, ab = b - a, len2 = (b - a):Dot(b - a), r = e.entranceRadius }
+	end
+	entranceCache[key] = found or false
+	return found
+end
+
+local entranceChunks: { [string]: { any } } = {}
+
+local function entrancesNear(cx: number, cz: number): { any }
+	local key = Cave.settings.seed .. ":" .. cx .. "," .. cz
+	local got = entranceChunks[key]
+	if got then
+		return got
+	end
+	local e = Cave.settings.surface
+	local cell = e.entranceCell
+	local pad = e.entranceRun + e.entranceRadius + 40
+	local list = {}
+	for gx = math.floor((cx * SIZE - pad) / cell), math.floor(((cx + 1) * SIZE + pad) / cell) do
+		for gz = math.floor((cz * SIZE - pad) / cell), math.floor(((cz + 1) * SIZE + pad) / cell) do
+			local en = entranceForCell(gx, gz)
+			if en then
+				local lo, hi = en.a:Min(en.b), en.a:Max(en.b)
+				local r = en.r + 8
+				if hi.X + r >= cx * SIZE and lo.X - r <= (cx + 1) * SIZE and hi.Z + r >= cz * SIZE and lo.Z - r <= (cz + 1) * SIZE then
+					table.insert(list, en)
+				end
+			end
+		end
+	end
+	entranceChunks[key] = list
+	return list
+end
+
 local function airness(p: Vector3): number
 	local s = Cave.settings
 	local f = featuresFor(math.floor(p.X / SIZE), math.floor(p.Y / SIZE), math.floor(p.Z / SIZE))
@@ -805,6 +894,18 @@ local function airness(p: Vector3): number
 			end
 		end
 	end
+	-- cave mouths, only near the top where they can be
+	if p.Y > s.top - SIZE - 12 then
+		for _, en in entrancesNear(math.floor(p.X / SIZE), math.floor(p.Z / SIZE)) do
+			local ap = p - en.a
+			local k = math.clamp(ap:Dot(en.ab) / en.len2, 0, 1)
+			local d = ap - en.ab * k
+			local v = en.r - Vector3.new(d.X, d.Y * (if d.Y < 0 then s.floorSquash else 0.85), d.Z).Magnitude
+			if v > best then
+				best = v
+			end
+		end
+	end
 	-- pillars put rock back, but only inside their cavern's height
 	for _, pl in f.pillars do
 		if math.abs(q.Y - pl.y) < pl.h then
@@ -827,6 +928,11 @@ local function airness(p: Vector3): number
 	local tube = tubeClearance(p)
 	if tube > best then
 		return tube + rough * 0.15
+	end
+	-- open sky above the ground. a bit of the roughness so the hills aren't perfectly smooth
+	if p.Y > s.top - 8 then
+		local sky = p.Y - surfaceHeight(p.X, p.Z)
+		return math.max(best + rough + shelf, sky + rough * 0.3)
 	end
 	return best + rough + shelf
 end
@@ -931,6 +1037,18 @@ Cave.biomeAt = biomeAt
 local function materialAt(p: Vector3, isFloor: boolean): Enum.Material
 	local s = Cave.settings
 	local o = s.seed * 31.7
+
+	-- the surface: grass on top, a few studs of earth under it, bare rock where it's steep
+	if p.Y > s.top - 8 then
+		local ground = surfaceHeight(p.X, p.Z)
+		if p.Y > ground - 7 then
+			local steep = math.abs(surfaceHeight(p.X + 4, p.Z) - ground) + math.abs(surfaceHeight(p.X, p.Z + 4) - ground)
+			if steep > 5 or math.noise(p.X * 0.03, o, p.Z * 0.03) > 0.45 then
+				return s.patch
+			end
+			return if isFloor and p.Y > ground - 4 then Enum.Material.Grass else Enum.Material.Ground
+		end
+	end
 
 	-- right round a lava tube: glowing cracked lava on the floor, dark basalt everywhere else
 	if tubeClearance(p) > -3 then
@@ -1729,6 +1847,46 @@ local function placeGeode(g, min: Vector3)
 	end
 end
 
+-- a timber frame just inside a cave mouth, where there's rock over the tunnel, and a lantern
+-- behind it. built by whichever chunk the frame lands in
+local function placeEntrance(en, min: Vector3)
+	local inward = -en.ab.Unit
+	local at = nil
+	for i = 0, 40 do
+		local c = en.mouth + inward * (i * 2)
+		if c.Y + en.r * 1.4 < surfaceHeight(c.X, c.Z) then
+			at = c
+			break
+		end
+	end
+	if not at or at.X < min.X or at.Y < min.Y or at.Z < min.Z
+		or at.X >= min.X + SIZE or at.Y >= min.Y + SIZE or at.Z >= min.Z + SIZE
+	then
+		return
+	end
+	local wood = Color3.fromRGB(84, 58, 38)
+	local model = Instance.new("Model")
+	model.Name = "CaveMouth"
+	local frame = CFrame.lookAt(at, at + en.out)
+	local half = en.r * 0.7
+	local function beam(size: Vector3, cf: CFrame)
+		local b = Instance.new("Part")
+		b.Name = "Timber"
+		b.Anchored = true
+		b.Size = size
+		b.CFrame = cf
+		b.Material = Enum.Material.Wood
+		b.Color = wood
+		b.Parent = model
+	end
+	for _, x in { -half, half } do
+		beam(Vector3.new(1.3, 9, 1.3), frame * CFrame.new(x, 0.75, 0))
+	end
+	beam(Vector3.new(half * 2 + 2.6, 1.3, 1.5), frame * CFrame.new(0, 5, 0))
+	keep(model, "Decor")
+	placeLantern(at + inward * 6)
+end
+
 -- an orange light on the floor of a lava tube every 18 studs or so, so the tube glows
 local function placeTubeGlow(tb, min: Vector3)
 	local pts = tubePath(tb)
@@ -2014,7 +2172,7 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 
 	local s = Cave.settings
 	local min = Vector3.new(cx, cy, cz) * SIZE
-	if min.Y >= s.top then
+	if min.Y >= s.top + s.surface.height + s.surface.hills * 1.6 + 8 then
 		return
 	end
 
@@ -2219,7 +2377,7 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 							materials[c.X][y][c.Z] = Enum.Material.Water
 							occupancy[c.X][y][c.Z] = 1
 						end
-						if biomeAt(start) == "rock" then
+						if biomeAt(start) == "rock" and start.Y < surfaceHeight(start.X, start.Z) - 8 then
 							for _, c in cells do
 								materials[c.X][y - 1][c.Z] = s.pools.flowstone
 							end
@@ -2291,6 +2449,11 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 	for _, g in geodes do
 		placeGeode(g, min)
 	end
+	if min.Y > s.top - SIZE - 12 then
+		for _, en in entrancesNear(cx, cz) do
+			placeEntrance(en, min)
+		end
+	end
 
 	-- crystal and mushroom caves light themselves, lanterns only in plain rock
 	if hasNode(cy) then
@@ -2302,10 +2465,16 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 
 	-- ore on walls: rock voxels with air right next to them, placed on the real surface
 	local rng = Random.new(s.seed * 1e6 + cx * 7919 + cy * 104729 + cz * 1299709)
+	-- nothing from the caves grows on the hills outside
+	local nearTop = min.Y + SIZE > s.top - 8
+	local function outdoors(x: number, y: number, z: number): boolean
+		local p = min + Vector3.new(x - 0.5, y - 0.5, z - 0.5) * VOXEL
+		return p.Y > surfaceHeight(p.X, p.Z) - 6
+	end
 	for x = 2, CHUNK - 1 do
 		for y = 2, CHUNK - 1 do
 			for z = 2, CHUNK - 1 do
-				if not air[x][y][z] then
+				if not air[x][y][z] and not (nearTop and outdoors(x, y, z)) then
 					-- half-buried boulders on floors, made of the same rock so they blend in. kept off
 					-- the chunk edges or the next chunk to load would slice them in half
 					if air[x][y + 1][z] and x >= 3 and x <= CHUNK - 2 and z >= 3 and z <= CHUNK - 2
@@ -2576,6 +2745,33 @@ function Cave.findChasm(near: Vector3?): Vector3?
 		end
 	end
 	warn("cave: no chasm found nearby, raise chasmChance or try another seed")
+	return nil
+end
+
+-- finds the nearest cave mouth, builds around it and (in edit mode) looks at it from outside
+function Cave.findEntrance(near: Vector3?): (Vector3?, Vector3?)
+	local c = near or Vector3.zero
+	local cell = Cave.settings.surface.entranceCell
+	local gx0, gz0 = math.floor(c.X / cell), math.floor(c.Z / cell)
+	for r = 0, 5 do
+		for dx = -r, r do
+			for dz = -r, r do
+				if math.max(math.abs(dx), math.abs(dz)) == r then
+					local en = entranceForCell(gx0 + dx, gz0 + dz)
+					if en then
+						Cave.preview(en.mouth, 2)
+						if not RunService:IsRunning() then
+							local eye = en.mouth + en.out * 30 + Vector3.new(0, 10, 0)
+							Workspace.CurrentCamera.CFrame = CFrame.lookAt(eye, en.mouth)
+						end
+						print("cave: cave mouth at", en.mouth)
+						return en.mouth, en.a
+					end
+				end
+			end
+		end
+	end
+	warn("cave: no cave mouth found nearby, raise surface.entranceChance")
 	return nil
 end
 
@@ -3041,6 +3237,8 @@ function Cave.clear()
 	table.clear(lights)
 	table.clear(featureCache)
 	table.clear(layoutCache)
+	table.clear(entranceCache)
+	table.clear(entranceChunks)
 	Cave.placed = 0
 	Cave.pools = 0
 	Cave.bridges = 0
@@ -3413,7 +3611,7 @@ local function digAt(player: Player, at: Vector3)
 	if not root or (root.Position - at).Magnitude > s.digReach then
 		return
 	end
-	if at.Y > s.top - 2 then
+	if at.Y > surfaceHeight(at.X, at.Z) + 4 then
 		return
 	end
 	lastDig[player] = now
@@ -3703,6 +3901,8 @@ function Cave.start()
 					local biome = biomeAt(p)
 					if biome == "rock" and p.Y < Cave.settings.lavaBelow then
 						biome = "deep"
+					elseif p.Y > surfaceHeight(p.X, p.Z) - 6 then
+						biome = "surface"
 					end
 					if player:GetAttribute("CaveBiome") ~= biome then
 						player:SetAttribute("CaveBiome", biome)

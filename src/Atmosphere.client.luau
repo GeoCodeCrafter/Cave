@@ -15,7 +15,11 @@ type Look = {
 	tint: Color3,
 	saturation: number,
 	mote: { color: Color3, size: number, rate: number, speed: number, rise: number, glow: number },
+	light: { ambient: Color3, outdoor: Color3, brightness: number }?,
 }
+
+-- the dark underground light the server sets. only the surface changes it
+local CAVE_LIGHT = { ambient = Color3.fromRGB(6, 6, 7), outdoor = Color3.fromRGB(4, 4, 5), brightness = 0 }
 
 local LOOKS: { [string]: Look } = {
 	rock = {
@@ -42,6 +46,13 @@ local LOOKS: { [string]: Look } = {
 		fog = Color3.fromRGB(90, 40, 20), decay = Color3.fromRGB(50, 15, 5), density = 0.42,
 		tint = Color3.fromRGB(255, 225, 200), saturation = 0.1,
 		mote = { color = Color3.fromRGB(255, 140, 60), size = 0.1, rate = 30, speed = 1, rise = 3, glow = 1 },
+	},
+	-- outside at night: moonlight, thin blue haze, a few fireflies
+	surface = {
+		fog = Color3.fromRGB(38, 46, 70), decay = Color3.fromRGB(18, 22, 36), density = 0.3,
+		tint = Color3.fromRGB(220, 230, 255), saturation = -0.1,
+		mote = { color = Color3.fromRGB(220, 255, 120), size = 0.12, rate = 5, speed = 0.3, rise = 0.1, glow = 1 },
+		light = { ambient = Color3.fromRGB(46, 50, 66), outdoor = Color3.fromRGB(80, 90, 120), brightness = 1.2 },
 	},
 }
 
@@ -83,6 +94,8 @@ local function apply(name: string?)
 	local look = LOOKS[name or "rock"] or LOOKS.rock
 	TweenService:Create(atmosphere, fade, { Color = look.fog, Decay = look.decay, Density = look.density }):Play()
 	TweenService:Create(grade, fade, { TintColor = look.tint, Saturation = look.saturation }):Play()
+	local light = look.light or CAVE_LIGHT
+	TweenService:Create(Lighting, fade, { Ambient = light.ambient, OutdoorAmbient = light.outdoor, Brightness = light.brightness }):Play()
 	local m = look.mote
 	motes.Color = ColorSequence.new(m.color)
 	motes.Size = NumberSequence.new(m.size)
