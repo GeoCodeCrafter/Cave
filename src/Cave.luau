@@ -133,6 +133,7 @@ Cave.settings = {
 		algaeColors = { Color3.fromRGB(80, 255, 170), Color3.fromRGB(60, 220, 255) },
 	},
 	radius = 2, -- chunks around each player
+	surfaceRadius = 10, -- the ground layer loads much further out, you can see a long way up there
 	unloadMargin = 2, -- chunks past radius before a chunk gets cleared away
 	lightDistance = 110, -- lights further than this from every player switch off
 	-- studs to push ore out of the wall. was 2 back when walls were smooth tubes, but on the rough
@@ -270,7 +271,7 @@ end
 local function surfaceHeight(x: number, z: number): number
 	local s = Cave.settings
 	local o = s.seed * 5.31
-	local hills = math.noise(x * 0.004 + 0.5, o, z * 0.004 + 0.5) * 0.7 + math.noise(x * 0.011 + o, 0.5, z * 0.011) * 0.3
+	local hills = math.noise(x * 0.009 + 0.5, o, z * 0.009 + 0.5) * 0.7 + math.noise(x * 0.025 + o, 0.5, z * 0.025) * 0.3
 	local h = s.surface.height + hills * s.surface.hills * 1.6 + math.noise(x * 0.04, o + 3.7, z * 0.04) * 2
 	return s.top + math.max(6, h)
 end
@@ -818,6 +819,7 @@ local function airness(p: Vector3): number
 	local r = math.max(s.minRadius, s.tunnelRadius * (1 + math.noise(p.X * 0.05, p.Y * 0.05, p.Z * 0.05 - o) * 0.4))
 
 	local best = -math.huge
+	local shaftBest = -math.huge -- kept apart so the roof below doesn't cap the sinkholes
 	for _, t in f.tunnels do
 		local ap = q - t.a
 		local k = math.clamp(ap:Dot(t.ab) / t.len2, 0, 1)
@@ -871,8 +873,8 @@ local function airness(p: Vector3): number
 					v = -1
 				end
 			end
-			if v > best then
-				best = v
+			if v > shaftBest then
+				shaftBest = v
 			end
 		end
 	end
@@ -894,6 +896,14 @@ local function airness(p: Vector3): number
 			end
 		end
 	end
+	-- a roof: caverns and chambers on the top level reach up past the low bits of ground and broke
+	-- through as huge open pits. nothing cave-shaped goes above 6 under the top of the mine, except
+	-- the sinkholes and cave mouths, which are meant to open up. that also keeps the ground layer
+	-- solid, which matters because far out only the ground layer gets built, nothing under it
+	if p.Y > s.top - 40 then
+		best = math.min(best, (s.top - 6) - p.Y)
+	end
+	best = math.max(best, shaftBest)
 	-- cave mouths, only near the top where they can be
 	if p.Y > s.top - SIZE - 12 then
 		for _, en in entrancesNear(math.floor(p.X / SIZE), math.floor(p.Z / SIZE)) do
@@ -936,6 +946,8 @@ local function airness(p: Vector3): number
 	end
 	return best + rough + shelf
 end
+
+Cave.airness = airness
 
 -- ============================================================ geodes
 --[[
@@ -2348,7 +2360,9 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 				then
 					local start = min + Vector3.new(x - 0.5, y - 0.5, z - 0.5) * VOXEL
 					local cells, walls, stack = {}, {}, { Vector3.new(x, y, z) }
+					-- underground only, water sitting in little dips on the grass just looked like cyan stickers
 					local leaks = start.Y < s.lavaBelow or tubeClearance(start) > -3
+						or start.Y > surfaceHeight(start.X, start.Z) - 8
 					pooled[pid(x, y, z)] = true
 					while #stack > 0 do
 						local c = table.remove(stack) :: Vector3
@@ -2552,6 +2566,27 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 	end	collecting = nil
 end
 
+-- the far ground: every ground-level chunk within surfaceRadius, plus the 4 under it wherever a
+-- sinkhole or cave mouth opens up, so you don't look down one and see sky at the bottom
+local function farGround(cx: number, cz: number): { Vector3 }
+	local s = Cave.settings
+	local groundCy = math.floor(s.top / SIZE)
+	local sr = s.surfaceRadius
+	local list = {}
+	for dx = -sr, sr do
+		for dz = -sr, sr do
+			local x, z = cx + dx, cz + dz
+			table.insert(list, Vector3.new(x, groundCy, z))
+			if #featuresFor(x, groundCy - 1, z).shafts > 0 or #entrancesNear(x, z) > 0 then
+				for dy = 1, 4 do
+					table.insert(list, Vector3.new(x, groundCy - dy, z))
+				end
+			end
+		end
+	end
+	return list
+end
+
 -- nearest chunks first, so whatever you're walking into shows up before the ones behind you
 function Cave.around(pos: Vector3)
 	local r = Cave.settings.radius
@@ -2563,6 +2598,15 @@ function Cave.around(pos: Vector3)
 				if not done[chunkKey(cx + dx, cy + dy, cz + dz)] then
 					table.insert(todo, Vector3.new(dx, dy, dz))
 				end
+			end
+		end
+	end
+	-- near the top, the ground layer loads a lot further out so the hills don't stop at a cliff edge
+	local groundCy = math.floor(Cave.settings.top / SIZE)
+	if cy >= groundCy - 2 then
+		for _, c in farGround(cx, cz) do
+			if not done[chunkKey(c.X, c.Y, c.Z)] then
+				table.insert(todo, c - Vector3.new(cx, cy, cz))
 			end
 		end
 	end
@@ -2602,9 +2646,17 @@ function Cave.unloadFar()
 	for key, c in chunkCoords do
 		if not pinned[key] then
 			local near = false
+			local groundCy = math.floor(Cave.settings.top / SIZE)
 			for _, p in centers do
 				local d = c - p
 				if math.max(math.abs(d.X), math.abs(d.Y), math.abs(d.Z)) <= keepWithin then
+					near = true
+					break
+				end
+				-- the far ground layer stays while you're anywhere near the top
+				if c.Y >= groundCy - 4 and p.Y >= groundCy - 2
+					and math.max(math.abs(d.X), math.abs(d.Z)) <= Cave.settings.surfaceRadius + Cave.settings.unloadMargin
+				then
 					near = true
 					break
 				end
@@ -2678,6 +2730,13 @@ function Cave.preview(center: Vector3?, radius: number?): Vector3
 			for dz = -r, r do
 				Cave.generateChunk(cx + dx, cy + dy, cz + dz)
 			end
+		end
+	end
+	-- and the ground layer further out, same as in game
+	local groundCy = math.floor(Cave.settings.top / SIZE)
+	if cy >= groundCy - 2 then
+		for _, c in farGround(cx, cz) do
+			Cave.generateChunk(c.X, c.Y, c.Z)
 		end
 	end
 	if not RunService:IsRunning() then
