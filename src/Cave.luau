@@ -96,6 +96,11 @@ Cave.settings = {
 	lantern = { color = Color3.fromRGB(255, 206, 158), brightness = 1.6, range = 36 },
 	glowwormChance = 0.3, -- per cavern ceiling voxel. tiny blue lights and hanging threads
 	glowwormColor = Color3.fromRGB(120, 205, 255),
+	roughness = 2.2, -- studs of bumps on the cave walls. 0 = smooth tubes
+	ledgeSpacing = 7, -- studs between the faint shelves along the walls
+	ledgeDepth = 1.2,
+	floorSquash = 1.7, -- how much flatter the floor is than the ceiling. 1 = round tubes
+	boulderChance = 0.012, -- per floor voxel, half-buried boulders
 	dark = true, -- pitch black away from lights, your helmet lamp does the rest
 	lamp = { range = 45, angle = 60, brightness = 2.4, color = Color3.fromRGB(255, 236, 205) },
 	flare = { cooldown = 1.5, burn = 20, maxEach = 5, speed = 55, color = Color3.fromRGB(255, 90, 60) },
@@ -341,13 +346,16 @@ local function airness(p: Vector3): number
 	for _, t in f.tunnels do
 		local ap = q - t.a
 		local k = math.clamp(ap:Dot(t.ab) / t.len2, 0, 1)
-		local v = r - (ap - t.ab * k).Magnitude
+		-- squashed below the middle and stretched above: flatter floor, arched ceiling
+		local d = ap - t.ab * k
+		local v = r - Vector3.new(d.X, d.Y * (if d.Y < 0 then s.floorSquash else 0.85), d.Z).Magnitude
 		if v > best then
 			best = v
 		end
 	end
 	for _, c in f.chambers do
-		local v = c.r - (q - c.c).Magnitude
+		local d = q - c.c
+		local v = c.r - Vector3.new(d.X, d.Y * (if d.Y < 0 then s.floorSquash else 0.85), d.Z).Magnitude
 		if v > best then
 			best = v
 		end
@@ -382,7 +390,15 @@ local function airness(p: Vector3): number
 			end
 		end
 	end
-	return best
+	-- rough rock instead of smooth tubes: two layers of small bumps, and in some areas faint
+	-- shelves running along the walls like layered rock
+	local rough = math.noise(p.X * 0.11, p.Y * 0.11 + o, p.Z * 0.11) * s.roughness
+		+ math.noise(p.X * 0.29 + o, p.Y * 0.29, p.Z * 0.29) * s.roughness * 0.45
+	local shelf = 0
+	if math.noise(p.X * 0.02, o * 2, p.Z * 0.02) > 0.1 and (p.Y / s.ledgeSpacing) % 1 < 0.25 then
+		shelf = -s.ledgeDepth
+	end
+	return best + rough + shelf
 end
 
 -- ============================================================ materials
@@ -1054,6 +1070,45 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 		end
 	end
 
+	-- small sealed bubbles (the rough walls make a few) get filled back in. anything touching
+	-- the chunk edge is left alone, it might open up into the next chunk
+	local seen: { [number]: boolean } = {}
+	local function cellId(x: number, y: number, z: number): number
+		return x + (y - 1) * CHUNK + (z - 1) * CHUNK * CHUNK
+	end
+	for sx = 1, CHUNK do
+		for sy = 1, CHUNK do
+			for sz = 1, CHUNK do
+				if air[sx][sy][sz] and not seen[cellId(sx, sy, sz)] then
+					local stack, cells, edge = { Vector3.new(sx, sy, sz) }, {}, false
+					seen[cellId(sx, sy, sz)] = true
+					while #stack > 0 do
+						local c = table.remove(stack) :: Vector3
+						table.insert(cells, c)
+						if c.X == 1 or c.Y == 1 or c.Z == 1 or c.X == CHUNK or c.Y == CHUNK or c.Z == CHUNK then
+							edge = true
+						end
+						for _, d in DIRS do
+							local n = c + d
+							if n.X >= 1 and n.Y >= 1 and n.Z >= 1 and n.X <= CHUNK and n.Y <= CHUNK and n.Z <= CHUNK
+								and air[n.X][n.Y][n.Z] and not seen[cellId(n.X, n.Y, n.Z)]
+							then
+								seen[cellId(n.X, n.Y, n.Z)] = true
+								table.insert(stack, n)
+							end
+						end
+					end
+					if not edge and #cells < 12 then
+						for _, c in cells do
+							air[c.X][c.Y][c.Z] = false
+							occupancy[c.X][c.Y][c.Z] = 1
+						end
+					end
+				end
+			end
+		end
+	end
+
 	-- a single air voxel with rock on all six sides is a sealed pocket. pillars leave the odd one
 	-- where they meet a cavern wall, so fill them back in. edges are skipped, the neighbour's unknown
 	for x = 2, CHUNK - 1 do
@@ -1144,6 +1199,16 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 		for y = 2, CHUNK - 1 do
 			for z = 2, CHUNK - 1 do
 				if not air[x][y][z] then
+					-- half-buried boulders on floors, made of the same rock so they blend in. kept off
+					-- the chunk edges or the next chunk to load would slice them in half
+					if air[x][y + 1][z] and x >= 3 and x <= CHUNK - 2 and z >= 3 and z <= CHUNK - 2
+						and rng:NextNumber() < s.boulderChance
+					then
+						local fp = min + Vector3.new(x - 0.5, y - 0.5, z - 0.5) * VOXEL
+						local floor = (wallBetween(fp, Vector3.yAxis))
+						local br = rng:NextNumber(1.8, 3.6)
+						terrain:FillBall(floor + Vector3.new(0, br * 0.2, 0), br, materialAt(fp, false))
+					end
 					-- glowworms, but only on cavern ceilings where there's a big roof to look up at
 					if air[x][y - 1][z] and rng:NextNumber() < s.glowwormChance then
 						local cp = min + Vector3.new(x - 0.5, y - 0.5, z - 0.5) * VOXEL

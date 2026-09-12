@@ -81,3 +81,7 @@
 **21 · furnished spawn room.** rails and a minecart of coal pointing at the first tunnel, crates, barrels, a tool rack, and a sign with the controls. the first tunnel gets lanterns and some easy ore. the coal floating by the tunnel mouth here is a bug, the dug-out room reached further than the ore spots so it lost its wall. moved them further down the tunnel
 
 ![the furnished spawn room](progress/21-furnished-spawn.png)
+
+**22 · glowworms and the dark.** it's properly dark away from lights now, you've got a helmet lamp, and F throws a flare. caverns get glowworms on the ceiling, little blue dots with a few hanging threads. a bit sparse from far away, might bump them up
+
+![glowworms on a cavern ceiling](progress/22-glowworms.png)
