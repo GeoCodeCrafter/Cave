@@ -89,3 +89,7 @@
 **23 · rough walls.** the tunnels were perfect round tubes, which is most of why it looked basic. now the rock is bumpy, there's faint shelves along the walls in places, floors are flatter with arched ceilings, and there's boulders half sunk into the floor
 
 ![rough walls and an arched ceiling by a rope bridge](progress/23-rough-walls.png)
+
+**24 · rock texture.** swapped roblox's stock rock for a proper pbr texture (Stylized Rock PBR Material by Nezhull, public domain). put it on rock and slate first and couldn't see it anywhere, turns out the top layers where you actually walk are sandstone and limestone. on those too now and it's a different game
+
+![a lantern-lit tunnel with the new rock texture](progress/24-rock-texture.png)

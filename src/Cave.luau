@@ -557,6 +557,164 @@ end
 
 -- ============================================================ ores
 
+-- ============================================================ meshes
+--[[
+	props built as real meshes from code (EditableMesh): a handful of shapes made once, then cloned
+	with a random size and turn. roblox caps how much code-built mesh a game can hold, so it's a
+	small library rather than a new mesh per prop. if meshes aren't allowed, props go back to blocks
+]]
+
+local meshLib: { [string]: { MeshPart } }? = nil
+local meshTried = false
+local meshBuilding = false
+local meshKeep: { any } = {} -- the EditableMeshes stay referenced so their geometry isn't freed
+
+-- every triangle gets its own corners so the faces come out flat, which suits the stylized rock.
+-- flipped if it faces inwards, or it'd be invisible from outside
+local function addTri(em: any, a: Vector3, b: Vector3, c: Vector3, inside: Vector3)
+	local n = (b - a):Cross(c - a)
+	if n.Magnitude < 1e-6 then
+		return
+	end
+	if n:Dot((a + b + c) / 3 - inside) < 0 then
+		b, c = c, b
+	end
+	em:AddTriangle(em:AddVertex(a), em:AddVertex(b), em:AddVertex(c))
+end
+
+-- a wobbly cone, root at y = 0, tip at y = -1
+local function spikeShape(em: any, rng: Random)
+	local sides, rings = rng:NextInteger(6, 8), 4
+	local ring = {}
+	for r = 0, rings - 1 do
+		local t = r / rings
+		local verts = {}
+		for i = 0, sides - 1 do
+			local a = i / sides * math.pi * 2 + r * 0.35 + rng:NextNumber(-0.15, 0.15)
+			local rr = 0.22 * (1 - t * 0.85) * rng:NextNumber(0.8, 1.2)
+			table.insert(verts, Vector3.new(math.cos(a) * rr, -t, math.sin(a) * rr))
+		end
+		table.insert(ring, verts)
+	end
+	local tip = Vector3.new(rng:NextNumber(-0.02, 0.02), -1, rng:NextNumber(-0.02, 0.02))
+	for r = 1, rings - 1 do
+		local a, b = ring[r], ring[r + 1]
+		local inside = Vector3.new(0, -(r - 0.5) / rings, 0)
+		for i = 1, sides do
+			local j = i % sides + 1
+			addTri(em, a[i], b[i], b[j], inside)
+			addTri(em, a[i], b[j], a[j], inside)
+		end
+	end
+	local last = ring[rings]
+	for i = 1, sides do
+		addTri(em, last[i], tip, last[i % sides + 1], Vector3.new(0, -0.85, 0))
+	end
+	local top = ring[1]
+	for i = 2, sides - 1 do
+		addTri(em, top[1], top[i], top[i + 1], Vector3.new(0, -0.5, 0))
+	end
+end
+
+-- a six-sided shard, base at y = 0, point at y = 1
+local function crystalShape(em: any, rng: Random)
+	local sides = 6
+	local r0 = 0.2 * rng:NextNumber(0.85, 1.15)
+	local twist = rng:NextNumber(0, math.pi)
+	local bottom, top = {}, {}
+	for i = 0, sides - 1 do
+		local a = i / sides * math.pi * 2 + twist
+		table.insert(bottom, Vector3.new(math.cos(a) * r0, 0, math.sin(a) * r0))
+		table.insert(top, Vector3.new(math.cos(a) * r0 * 0.9, 0.72, math.sin(a) * r0 * 0.9))
+	end
+	local tip = Vector3.new(rng:NextNumber(-0.03, 0.03), 1, rng:NextNumber(-0.03, 0.03))
+	for i = 1, sides do
+		local j = i % sides + 1
+		addTri(em, bottom[i], top[i], top[j], Vector3.new(0, 0.36, 0))
+		addTri(em, bottom[i], top[j], bottom[j], Vector3.new(0, 0.36, 0))
+		addTri(em, top[i], tip, top[j], Vector3.new(0, 0.8, 0))
+	end
+	for i = 2, sides - 1 do
+		addTri(em, bottom[1], bottom[i], bottom[i + 1], Vector3.new(0, 0.3, 0))
+	end
+end
+
+-- a lumpy rock around the origin, about 1 stud across
+local function lumpShape(em: any, rng: Random)
+	local lat, lon = 5, 7
+	local off = rng:NextNumber(0, 100)
+	local pts = {}
+	for u = 0, lat do
+		pts[u] = {}
+		for v = 0, lon do
+			local theta = u / lat * math.pi
+			local phi = (v % lon) / lon * math.pi * 2
+			local dir = Vector3.new(math.sin(theta) * math.cos(phi), math.cos(theta), math.sin(theta) * math.sin(phi))
+			pts[u][v] = dir * 0.5 * (1 + math.noise(dir.X * 1.7 + off, dir.Y * 1.7, dir.Z * 1.7) * 0.6)
+		end
+	end
+	for u = 0, lat - 1 do
+		for v = 0, lon - 1 do
+			local a, b, c, d = pts[u][v], pts[u + 1][v], pts[u + 1][v + 1], pts[u][v + 1]
+			addTri(em, a, b, c, Vector3.zero)
+			addTri(em, a, c, d, Vector3.zero)
+		end
+	end
+end
+
+local function meshPart(shape: (any, Random) -> (), rng: Random): MeshPart
+	local AssetService = game:GetService("AssetService")
+	local em = AssetService:CreateEditableMesh()
+	shape(em, rng)
+	table.insert(meshKeep, em)
+	local part = AssetService:CreateMeshPartAsync(Content.fromObject(em))
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	return part
+end
+
+local function buildMeshLib(): { [string]: { MeshPart } }?
+	while meshBuilding do
+		task.wait()
+	end
+	if meshTried then
+		return meshLib
+	end
+	meshTried = true
+	meshBuilding = true
+	local ok, err = pcall(function()
+		local rng = Random.new(4242)
+		local lib = { spike = {}, crystal = {}, lump = {} }
+		for _ = 1, 6 do
+			table.insert(lib.spike, meshPart(spikeShape, rng))
+		end
+		for _ = 1, 4 do
+			table.insert(lib.crystal, meshPart(crystalShape, rng))
+		end
+		for _ = 1, 8 do
+			table.insert(lib.lump, meshPart(lumpShape, rng))
+		end
+		meshLib = lib
+	end)
+	meshBuilding = false
+	if not ok then
+		warn("cave: couldn't build meshes, props fall back to blocks:", err)
+	end
+	return meshLib
+end
+Cave.buildMeshLib = buildMeshLib
+
+-- a copy of one of the library shapes, or nil if meshes aren't available
+local function newMesh(kind: string, rng: Random): MeshPart?
+	local lib = buildMeshLib()
+	local list = lib and lib[kind]
+	if not list or #list == 0 then
+		return nil
+	end
+	return list[rng:NextInteger(1, #list)]:Clone()
+end
+
 local function pickOre(depth: number, rng: Random)
 	for i = #Cave.settings.ores, 1, -1 do
 		local ore = Cave.settings.ores[i]
@@ -578,7 +736,7 @@ local function placeOre(ore, wall: Vector3, normal: Vector3, rng: Random)
 	local up = normal:Cross(side)
 
 	for _ = 1, rng:NextInteger(3, 6) do
-		local part = Instance.new(if rng:NextNumber() < 0.4 then "WedgePart" else "Part")
+		local part = newMesh("lump", rng) or Instance.new(if rng:NextNumber() < 0.4 then "WedgePart" else "Part")
 		part.Name = ore.name
 		part.Anchored = true
 		part.Size = Vector3.new(rng:NextNumber(0.8, 2.2), rng:NextNumber(0.8, 2.6), rng:NextNumber(0.8, 2.2))
@@ -645,7 +803,8 @@ local function placeCrystal(wall: Vector3, normal: Vector3, rng: Random)
 		local dir = (normal + side * rng:NextNumber(-0.6, 0.6) + up * rng:NextNumber(-0.6, 0.6)).Unit
 		local base = wall + side * rng:NextNumber(-1, 1) + up * rng:NextNumber(-1, 1) - normal * 0.5
 
-		local part = Instance.new("Part")
+		local shard = newMesh("crystal", rng)
+		local part: BasePart = shard or Instance.new("Part")
 		part.Name = "Shard"
 		part.Anchored = true
 		part.CanCollide = false
@@ -653,8 +812,14 @@ local function placeCrystal(wall: Vector3, normal: Vector3, rng: Random)
 		part.Material = Enum.Material.Neon
 		part.Color = color
 		part.Transparency = 0.15
-		part.Size = Vector3.new(width, width, len)
-		part.CFrame = safeLookAt(base + dir * len / 2, dir)
+		if shard then
+			-- the mesh points up its y axis, turn that to point along dir
+			part.Size = Vector3.new(width, len, width)
+			part.CFrame = safeLookAt(base + dir * len / 2, dir) * CFrame.Angles(-math.pi / 2, 0, 0)
+		else
+			part.Size = Vector3.new(width, width, len)
+			part.CFrame = safeLookAt(base + dir * len / 2, dir)
+		end
 		part.Parent = model
 	end
 
@@ -893,6 +1058,23 @@ local function placeSpike(base: Vector3, up: Vector3, color: Color3, rng: Random
 
 	local model = Instance.new("Model")
 	model.Name = if sign < 0 then "Stalactite" else "Stalagmite"
+
+	-- one real cone if meshes work. its root is at the top and it points down, so stalagmites flip it
+	local cone = newMesh("spike", rng)
+	if cone then
+		cone.Anchored = true
+		cone.CanCollide = solid
+		cone.Material = Enum.Material.Slate
+		cone.Color = color
+		cone.Size = Vector3.new(width, len, width)
+		local turn = if sign > 0 then CFrame.Angles(math.pi, spin, 0) else CFrame.Angles(0, spin, 0)
+		-- sunk 0.6 studs into the rock so there's no gap where it meets the ceiling/floor
+		cone.CFrame = axis * CFrame.new(0, sign * (len / 2 - 0.6), 0) * turn
+		cone.Parent = model
+		keep(model, "Decor")
+		return
+	end
+
 	for i = 0, segments - 1 do
 		local h = len / segments
 		local w = width * (1 - (i / segments) * 0.8)
@@ -914,7 +1096,7 @@ local function placeRubble(floor: Vector3, color: Color3, rng: Random)
 	model.Name = "Rubble"
 	for _ = 1, rng:NextInteger(2, 5) do
 		local size = Vector3.new(rng:NextNumber(0.5, 1.6), rng:NextNumber(0.4, 1.1), rng:NextNumber(0.5, 1.6))
-		local part = Instance.new("Part")
+		local part = newMesh("lump", rng) or Instance.new("Part")
 		part.Anchored = true
 		part.CanCollide = false
 		part.Material = Enum.Material.Slate
@@ -1430,6 +1612,8 @@ function Cave.preview(center: Vector3?, radius: number?): Vector3
 	Cave.applyColors()
 	Cave.applyTextures()
 	Cave.applyLighting()
+	-- build the prop meshes up front so chunk generation never stops to wait for them
+	buildMeshLib()
 	local cx, cy, cz = math.floor(spot.X / SIZE), math.floor(spot.Y / SIZE), math.floor(spot.Z / SIZE)
 	for dy = -2, 1 do
 		for dx = -r, r do
@@ -2432,6 +2616,8 @@ function Cave.start()
 	Cave.applyColors()
 	Cave.applyTextures()
 	Cave.applyLighting()
+	-- build the prop meshes up front so chunk generation never stops to wait for them
+	buildMeshLib()
 	Cave.showSeed()
 
 	-- tell each player's Atmosphere script which biome they're standing in, it does the fog and particles
