@@ -97,3 +97,39 @@
 **25 · checker boxes.** made the stalactites, crystals and ore into real meshes built from code, and they looked great in studio. in an actual game they were this: red and green checker boxes. meshes made on the server never reach players, i'd only checked the part arrived and not its shape. now the server puts down plain stand-ins and each player's computer builds the meshes itself. also found about 1 ore clump in 10 floating, the push off the wall was set for the old smooth tunnels, measured it and dropped it from 2 studs to 0.5
 
 ![ore showing up as checker boxes in game](progress/25-checker-boxes.png)
+
+**26 · underground rivers, first go.** rivers wind downhill between junctions with real water in the bottom. this is what it looked like: a flat navy slab. reflective water in a dark cave just mirrors the dark
+
+![the first river, a flat navy slab](progress/26-river-first.png)
+
+**27 · rivers, fixed.** lighter clearer water that barely reflects, small waves, soft lights under the surface, a sand bed and narrower channels. you can see down it now
+
+![a river running off down a tunnel](progress/27-river.png)
+
+**28 · sinkholes.** round shafts from the surface down through a few layers, with a spiral ledge round the wall and a torch every quarter turn. first version bent like the tunnels do and you couldn't see down it, they're dead straight now
+
+![looking down a sinkhole](progress/28-sinkhole.png)
+
+**29 · looking up one.** it was still night up top at this point
+
+![the moon through the top of a sinkhole](progress/29-sinkhole-up.png)
+
+**30 · lava tubes.** long round tunnels deep down, cracked glowing lava floor, basalt walls, barely any bumps so they look melted instead of dug
+
+![inside a lava tube](progress/30-lava-tube.png)
+
+**31 · geodes.** hollow balls sealed inside solid rock, the only thing in the mine that doesn't connect. lined with glowing crystals pointing in. the only clue is a faint sparkle on the nearest tunnel wall, so you have to dig in
+
+![inside a geode](progress/31-geode-inside.png)
+
+**32 · a geode dug out.** what it looks like with the rock round it cleared away
+
+![a geode from outside](progress/32-geode.png)
+
+**33 · the surface.** the mine used to just stop at y 0. now there's hills over it, and in between the layout became random trees with loops instead of a grid, and water settles in the dips in the floor. first versions of this had it at night (too dark), stopping in a cliff 2 chunks out, and caverns punching huge holes in the grass. it loads 10 chunks out now and the caves keep a proper roof
+
+![hills over the mine](progress/33-surface.png)
+
+**34 · a sinkhole from up top.** the orange blobs in the last one are these
+
+![a sinkhole in the grass](progress/34-sinkhole-from-above.png)
