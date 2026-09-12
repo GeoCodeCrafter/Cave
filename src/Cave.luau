@@ -55,9 +55,12 @@ Cave.settings = {
 	geodeCell = 160, -- studs, at most one geode per cube this size
 	geodeChance = 0.35,
 	geodeRadius = 8,
-	southChance = 0.6, -- east links are always there, south ones only sometimes, so it's less of a grid
-	diagChance = 0.25,
-	rampChance = 0.45, -- per node, a sloped tunnel down to the level below
+	-- layout: each region of chunks gets a random tree of tunnels, then a few extra links on top
+	regionSize = 4, -- chunks per side
+	loopChance = 0.12, -- a link the tree didn't use gets dug anyway, which makes a loop
+	diagChance = 0.04, -- the odd diagonal shortcut
+	crossChance = 0.15, -- regions always join their east and south neighbour once, sometimes more
+	rampsPerRegion = 1, -- sloped tunnels down to the level below
 	top = 0, -- nothing generates above this y
 	-- top down, each layer starts at this y (edges get warped by noise)
 	-- band = the thin stripes running through each layer, like real sedimentary rock
@@ -214,10 +217,13 @@ end
 
 -- ============================================================ the tunnel network
 --[[
-	every chunk has one node somewhere inside it. each node gets a tunnel to the
-	node east (+x) and south (+z) of it, so every level is one connected grid.
-	some nodes also get a ramp down to the level below, and some get a chamber.
-	all the air is part of that network, so nothing can end up sealed off.
+	every chunk has one node somewhere inside it. the chunks are grouped into regions (4x4 on each
+	level) and each region gets a random spanning tree over its nodes: every node is reachable, but
+	the branches end in real dead ends. then a few links the tree skipped get dug anyway to make
+	loops, each region joins its east and south neighbour at least once, and a couple of ramps go
+	down to the level below. so it's all still one connected network, just not a grid any more.
+	nodes where 4+ tunnels meet are hubs and always get a chamber, the big caverns only go on busy
+	junctions, and dead ends sometimes finish in a small pocket.
 ]]
 
 local function hash(x: number, y: number, z: number, k: number): number
@@ -238,6 +244,143 @@ local function nodeAt(cx: number, cy: number, cz: number): Vector3
 		cy + 0.3 + hash(cx, cy, cz, 2) * 0.4,
 		cz + 0.1 + hash(cx, cy, cz, 3) * 0.8
 	) * SIZE
+end
+
+-- links go from a node to one of these: east, south, diagonal, ramp down east, ramp down south
+local STEP = {
+	Vector3.new(1, 0, 0),
+	Vector3.new(0, 0, 1),
+	Vector3.new(1, 0, 1),
+	Vector3.new(1, -1, 0),
+	Vector3.new(0, -1, 1),
+}
+local layoutCache: { [string]: { [string]: boolean } } = {}
+
+-- every link whose first node is in this region, as "x,z,dir" = true
+local function regionLinks(rx: number, y: number, rz: number): { [string]: boolean }
+	local s = Cave.settings
+	local key = s.seed .. ":" .. rx .. "," .. y .. "," .. rz
+	local got = layoutCache[key]
+	if got then
+		return got
+	end
+	local n = s.regionSize
+	local x0, z0 = rx * n, rz * n
+	local links: { [string]: boolean } = {}
+	local function add(x: number, z: number, d: number)
+		links[x .. "," .. z .. "," .. d] = true
+	end
+
+	-- random spanning tree: every inside link gets a random weight, take them lightest first and
+	-- keep each one that joins two bits that weren't joined yet (kruskal). the rest might be loops
+	local parent = {}
+	for i = 1, n * n do
+		parent[i] = i
+	end
+	local function root(i: number): number
+		while parent[i] ~= i do
+			parent[i] = parent[parent[i]]
+			i = parent[i]
+		end
+		return i
+	end
+	local function id(x: number, z: number): number
+		return (x - x0) + (z - z0) * n + 1
+	end
+	local edges = {}
+	for x = x0, x0 + n - 1 do
+		for z = z0, z0 + n - 1 do
+			if x < x0 + n - 1 then
+				table.insert(edges, { x = x, z = z, d = 1, w = hash(x, y, z, 200) })
+			end
+			if z < z0 + n - 1 then
+				table.insert(edges, { x = x, z = z, d = 2, w = hash(x, y, z, 201) })
+			end
+		end
+	end
+	table.sort(edges, function(a, b)
+		return a.w < b.w
+	end)
+	for _, e in edges do
+		local a = root(id(e.x, e.z))
+		local b = root(if e.d == 1 then id(e.x + 1, e.z) else id(e.x, e.z + 1))
+		if a ~= b then
+			parent[a] = b
+			add(e.x, e.z, e.d)
+		elseif hash(e.x, y, e.z, 202 + e.d) < s.loopChance then
+			add(e.x, e.z, e.d)
+		end
+	end
+
+	for x = x0, x0 + n - 2 do
+		for z = z0, z0 + n - 2 do
+			if hash(x, y, z, 205) < s.diagChance then
+				add(x, z, 3)
+			end
+		end
+	end
+
+	-- join the neighbours: one crossing always, the others sometimes
+	local pickE = math.floor(hash(rx, y, rz, 206) * n)
+	local pickS = math.floor(hash(rx, y, rz, 207) * n)
+	for i = 0, n - 1 do
+		if i == pickE or hash(x0 + n - 1, y, z0 + i, 208) < s.crossChance then
+			add(x0 + n - 1, z0 + i, 1)
+		end
+		if i == pickS or hash(x0 + i, y, z0 + n - 1, 209) < s.crossChance then
+			add(x0 + i, z0 + n - 1, 2)
+		end
+	end
+
+	-- ramps down, at least one so every level joins the one below
+	for i = 1, math.max(1, s.rampsPerRegion) do
+		local x = x0 + math.floor(hash(rx, y, rz, 210 + i) * n)
+		local z = z0 + math.floor(hash(rx, y, rz, 220 + i) * n)
+		add(x, z, if hash(rx, y, rz, 230 + i) < 0.5 then 4 else 5)
+	end
+
+	layoutCache[key] = links
+	return links
+end
+
+local function hasLink(x: number, y: number, z: number, d: number): boolean
+	if not hasNode(y) then
+		return false
+	end
+	local n = Cave.settings.regionSize
+	return regionLinks(math.floor(x / n), y, math.floor(z / n))[x .. "," .. z .. "," .. d] == true
+end
+
+-- the grid coordinates of every node this one has a tunnel to, both ways
+local function linkedTo(x: number, y: number, z: number): { Vector3 }
+	local out = {}
+	local here = Vector3.new(x, y, z)
+	for d, step in STEP do
+		if hasLink(x, y, z, d) then
+			table.insert(out, here + step)
+		end
+		local from = here - step
+		if hasLink(from.X, from.Y, from.Z, d) then
+			table.insert(out, from)
+		end
+	end
+	return out
+end
+
+-- what goes at a node, from how many tunnels meet there
+local function nodeKind(x: number, y: number, z: number): string
+	local s = Cave.settings
+	local links = #linkedTo(x, y, z)
+	if links >= 3 and hash(x, y, z, 10) < s.cavernChance then
+		return "cavern"
+	elseif links >= 4 then
+		return "hub"
+	elseif links == 1 then
+		return if hash(x, y, z, 6) < 0.5 then "pocket" else "end"
+	elseif hash(x, y, z, 6) < s.chamberChance * (if links == 3 then 1 else 0.4) then
+		return "chamber"
+	end
+	return "tunnel"
 end
 
 -- the lava tube that starts in this big grid cell, if there is one. it runs between two junctions
@@ -356,26 +499,16 @@ local function featuresFor(cx: number, cy: number, cz: number)
 			for z = cz - 2, cz + 1 do
 				if hasNode(y) then
 					local a = nodeAt(x, y, z)
-					local links = { nodeAt(x + 1, y, z) }
-					if hash(x, y, z, 8) < s.southChance then
-						table.insert(links, nodeAt(x, y, z + 1))
-					end
-					if hash(x, y, z, 9) < s.diagChance then
-						table.insert(links, nodeAt(x + 1, y, z + 1))
-					end
-					if hash(x, y, z, 4) < s.rampChance and hasNode(y - 1) then
-						if hash(x, y, z, 5) < 0.5 then
-							table.insert(links, nodeAt(x + 1, y - 1, z))
-						else
-							table.insert(links, nodeAt(x, y - 1, z + 1))
+					for d, step in STEP do
+						if hasLink(x, y, z, d) then
+							local b = nodeAt(x + step.X, y + step.Y, z + step.Z)
+							if touches(a, b) then
+								table.insert(tunnels, { a = a, ab = b - a, len2 = (b - a):Dot(b - a) })
+							end
 						end
 					end
-					for _, b in links do
-						if touches(a, b) then
-							table.insert(tunnels, { a = a, ab = b - a, len2 = (b - a):Dot(b - a) })
-						end
-					end
-					if hash(x, y, z, 10) < s.cavernChance then
+					local kind = nodeKind(x, y, z)
+					if kind == "cavern" then
 						if touches(a, a) then
 							local r = s.cavernRadius * (0.8 + hash(x, y, z, 11) * 0.4)
 							table.insert(caverns, { c = a, r = r, flat = s.cavernFlatten })
@@ -392,8 +525,14 @@ local function featuresFor(cx: number, cy: number, cz: number)
 								})
 							end
 						end
-					elseif hash(x, y, z, 6) < s.chamberChance and touches(a, a) then
-						table.insert(chambers, { c = a, r = s.chamberRadius * (0.7 + hash(x, y, z, 7) * 0.6) })
+					elseif touches(a, a) then
+						local size = if kind == "hub" then 1 + hash(x, y, z, 7) * 0.35
+							elseif kind == "chamber" then 0.7 + hash(x, y, z, 7) * 0.6
+							elseif kind == "pocket" then 0.45 + hash(x, y, z, 7) * 0.2
+							else 0
+						if size > 0 then
+							table.insert(chambers, { c = a, r = s.chamberRadius * size })
+						end
 					end
 				end
 			end
@@ -2280,7 +2419,8 @@ end
 function Cave.findSpawn(near: Vector3?): Vector3
 	local c = near or Vector3.new(0, -40, 0)
 	local cy = math.min(math.floor(c.Y / SIZE), math.floor(Cave.settings.top / SIZE) - 1)
-	local node = nodeAt(math.floor(c.X / SIZE), cy, math.floor(c.Z / SIZE))
+	-- nodes live in bent space, unwarp puts it where the tunnel really is
+	local node = unwarp(nodeAt(math.floor(c.X / SIZE), cy, math.floor(c.Z / SIZE)))
 	-- drop to the floor
 	local p = node
 	for _ = 1, 20 do
@@ -2327,7 +2467,7 @@ function Cave.findCavern(near: Vector3?): Vector3?
 				if math.max(math.abs(dx), math.abs(dz)) == r then
 					for cy = topCy, topCy - 3, -1 do
 						local x, z = cx0 + dx, cz0 + dz
-						if hash(x, cy, z, 10) < Cave.settings.cavernChance then
+						if nodeKind(x, cy, z) == "cavern" then
 							local node = nodeAt(x, cy, z)
 							Cave.preview(node, 2)
 							if not RunService:IsRunning() then
@@ -2594,11 +2734,19 @@ function Cave.buildSpawnRoom(center: Vector3?): CFrame
 	light.Shadows = true
 	light.Parent = block("Lamp", Vector3.new(1.2, 1.2, 1.2), CFrame.new(spot.X, floorY + postHeight - 1.2, spot.Z), Enum.Material.Neon, Cave.settings.lantern.color)
 
-	-- which way the first tunnel goes. every node links east, so that one's always there
+	-- which way the first tunnel goes: along one of the node's links, a level one if there is one
 	local c = center or Vector3.new(0, -40, 0)
 	local nx, nz = math.floor(c.X / SIZE), math.floor(c.Z / SIZE)
 	local ny = math.min(math.floor(c.Y / SIZE), math.floor(Cave.settings.top / SIZE) - 1)
-	local node, east = nodeAt(nx, ny, nz), nodeAt(nx + 1, ny, nz)
+	local links = linkedTo(nx, ny, nz)
+	local first = links[1]
+	for _, l in links do
+		if l.Y == ny then
+			first = l
+			break
+		end
+	end
+	local node, east = nodeAt(nx, ny, nz), nodeAt(first.X, first.Y, first.Z)
 	local flatDir = Vector3.new(east.X - node.X, 0, east.Z - node.Z).Unit
 	local floorMid = Vector3.new(spot.X, floorY, spot.Z)
 	-- room-local frame: -z points at the first tunnel, +x is to your right
@@ -2708,6 +2856,65 @@ function Cave.buildSpawnRoom(center: Vector3?): CFrame
 	return pad.CFrame + Vector3.new(0, 3, 0)
 end
 
+-- numbers for this seed's network, in a block of regions around the spawn: how many junctions,
+-- dead ends, hubs and loops, how much tunnel, and whether it's all one piece
+function Cave.stats(regions: number?, levels: number?): { [string]: number }
+	local s = Cave.settings
+	local n = s.regionSize
+	local half = (regions or 3) * n
+	local topY = math.floor(s.top / SIZE) - 1
+	local lowY = topY - (levels or 4) + 1
+	local function inside(v: Vector3): boolean
+		return v.X >= -half and v.X < half and v.Z >= -half and v.Z < half and v.Y <= topY and v.Y >= lowY
+	end
+	local out = { nodes = 0, links = 0, deadEnds = 0, hubs = 0, caverns = 0, chambers = 0, pieces = 0, loops = 0, tunnelStuds = 0 }
+	local seen: { [string]: boolean } = {}
+	for y = topY, lowY, -1 do
+		for x = -half, half - 1 do
+			for z = -half, half - 1 do
+				out.nodes += 1
+				local here = Vector3.new(x, y, z)
+				local links = linkedTo(x, y, z)
+				for _, l in links do
+					-- count each link once, from its lower end, and only if both ends are in the block
+					if inside(l) and (l.Y < y or (l.Y == y and (l.X > x or (l.X == x and l.Z > z)))) then
+						out.links += 1
+						out.tunnelStuds += (nodeAt(l.X, l.Y, l.Z) - nodeAt(x, y, z)).Magnitude
+					end
+				end
+				local kind = nodeKind(x, y, z)
+				if #links == 1 then out.deadEnds += 1 end
+				if #links >= 4 then out.hubs += 1 end
+				if kind == "cavern" then out.caverns += 1 end
+				if kind == "chamber" or kind == "hub" or kind == "pocket" then out.chambers += 1 end
+				-- flood fill from every node nobody's reached yet, each fill is one separate piece
+				local key = x .. "," .. y .. "," .. z
+				if not seen[key] then
+					out.pieces += 1
+					seen[key] = true
+					local stack = { here }
+					while #stack > 0 do
+						local v = table.remove(stack) :: Vector3
+						for _, l in linkedTo(v.X, v.Y, v.Z) do
+							local k = l.X .. "," .. l.Y .. "," .. l.Z
+							if inside(l) and not seen[k] then
+								seen[k] = true
+								table.insert(stack, l)
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+	out.loops = out.links - out.nodes + out.pieces
+	out.tunnelStuds = math.floor(out.tunnelStuds)
+	print(("cave stats, seed %d, %d junctions: %d dead ends, %d hubs, %d loops, %d caverns, %d chambers, %.1f km of tunnel, %s"):format(
+		s.seed, out.nodes, out.deadEnds, out.hubs, out.loops, out.caverns, out.chambers, out.tunnelStuds * 0.28 / 1000,
+		if out.pieces == 1 then "all one connected cave" else out.pieces .. " SEPARATE PIECES"))
+	return out
+end
+
 -- does the terrain roblox built match what the code thinks is rock/air?
 function Cave.check()
 	local spot = Cave.findSpawn()
@@ -2770,6 +2977,7 @@ function Cave.clear()
 	table.clear(digs)
 	table.clear(lights)
 	table.clear(featureCache)
+	table.clear(layoutCache)
 	Cave.placed = 0
 	Cave.bridges = 0
 end
