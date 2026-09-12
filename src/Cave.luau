@@ -47,6 +47,10 @@ Cave.settings = {
 	ledgeWidth = 6, -- the spiral shelf running round the inside wall
 	ledgePitch = 28, -- studs it drops per full turn. 28 on a 13 stud shaft is about a 20 degree slope
 	ledgeThickness = 4.5,
+	-- lava tubes: long smooth round tunnels deep down, with a glowing cracked-lava floor
+	tubeCell = 352, -- studs, at most one tube per cell this size
+	tubeChance = 0.5,
+	tubeRadius = 8,
 	southChance = 0.6, -- east links are always there, south ones only sometimes, so it's less of a grid
 	diagChance = 0.25,
 	rampChance = 0.45, -- per node, a sloped tunnel down to the level below
@@ -230,6 +234,31 @@ local function nodeAt(cx: number, cy: number, cz: number): Vector3
 		cy + 0.3 + hash(cx, cy, cz, 2) * 0.4,
 		cz + 0.1 + hash(cx, cy, cz, 3) * 0.8
 	) * SIZE
+end
+
+-- the lava tube that starts in this big grid cell, if there is one. it runs between two junctions
+-- several chunks apart down in the deep layers. the actual curve is worked out later in tubePath
+local function tubeForCell(gx: number, gz: number)
+	local s = Cave.settings
+	if hash(gx, 7373, gz, 90) >= s.tubeChance then
+		return nil
+	end
+	local cell = s.tubeCell
+	local cx = math.floor((gx + 0.3 + hash(gx, 7373, gz, 91) * 0.4) * cell / SIZE)
+	local cz = math.floor((gz + 0.3 + hash(gx, 7373, gz, 92) * 0.4) * cell / SIZE)
+	local cy = math.floor(s.top / SIZE) - 5 - math.floor(hash(gx, 7373, gz, 93) * 2)
+	if not hasNode(cy) then
+		return nil
+	end
+	local dx = (if hash(gx, 7373, gz, 94) < 0.5 then -1 else 1) * (6 + math.floor(hash(gx, 7373, gz, 95) * 4))
+	local dz = (if hash(gx, 7373, gz, 96) < 0.5 then -1 else 1) * math.floor(hash(gx, 7373, gz, 97) * 3)
+	return {
+		a = nodeAt(cx, cy, cz),
+		b = nodeAt(cx + dx, cy, cz + dz),
+		r = s.tubeRadius * (0.85 + hash(gx, 7373, gz, 98) * 0.3),
+		amp = 14 + hash(gx, 7373, gz, 99) * 16,
+		phase = hash(gx, 7373, gz, 100) * math.pi * 2,
+	}
 end
 
 -- the shaft in this big grid cell, if there is one. it's centred on a junction on the top layer, so
@@ -438,6 +467,23 @@ local function featuresFor(cx: number, cy: number, cz: number)
 		end
 	end
 
+	local tubes = {}
+	local tcell = s.tubeCell
+	for gx = math.floor(lo.X / tcell) - 2, math.floor(hi.X / tcell) + 2 do
+		for gz = math.floor(lo.Z / tcell) - 2, math.floor(hi.Z / tcell) + 2 do
+			local tb = tubeForCell(gx, gz)
+			if tb then
+				local mn, mx = tb.a:Min(tb.b), tb.a:Max(tb.b)
+				local pad = tb.amp + tb.r + s.wiggle * 1.5 + 8
+				if mx.X + pad >= lo.X and mn.X - pad <= hi.X and mx.Z + pad >= lo.Z and mn.Z - pad <= hi.Z
+					and mx.Y + pad >= lo.Y and mn.Y - pad <= hi.Y
+				then
+					table.insert(tubes, tb)
+				end
+			end
+		end
+	end
+
 	cached = {
 		tunnels = tunnels,
 		chambers = chambers,
@@ -446,6 +492,7 @@ local function featuresFor(cx: number, cy: number, cz: number)
 		chasms = chasms,
 		rivers = rivers,
 		shafts = shafts,
+		tubes = tubes,
 	}
 	featureCache[key] = cached
 	return cached
@@ -480,6 +527,46 @@ local function shaftCentre(sh): Vector3
 		sh.pc = unwarp(Vector3.new(sh.c.X, sh.top - 40, sh.c.Y))
 	end
 	return sh.pc
+end
+
+-- a lava tube's curve, in real space: from one junction's real position to the other's, swaying side
+-- to side and rising and dipping a little. worked out once and kept
+local function tubePath(tb): { Vector3 }
+	if tb.path then
+		return tb.path
+	end
+	local a, b = unwarp(tb.a), unwarp(tb.b)
+	local flat = Vector3.new(b.X - a.X, 0, b.Z - a.Z)
+	local side = if flat.Magnitude > 0.1 then Vector3.new(-flat.Z, 0, flat.X).Unit else Vector3.xAxis
+	local pts = {}
+	for i = 0, 10 do
+		local t = i / 10
+		local ends = math.sin(t * math.pi) -- 0 at both ends, so they sit exactly on the junctions
+		local sway = math.sin(t * math.pi * 2 + tb.phase) * tb.amp * ends
+		local lift = math.sin(t * math.pi * 3 + tb.phase) * 4 * ends
+		table.insert(pts, a:Lerp(b, t) + side * sway + Vector3.new(0, lift, 0))
+	end
+	tb.path = pts
+	return pts
+end
+
+-- how far inside the nearest lava tube a point is. > 0 is inside, < 0 is out in the rock
+local function tubeClearance(p: Vector3): number
+	local f = featuresFor(math.floor(p.X / SIZE), math.floor(p.Y / SIZE), math.floor(p.Z / SIZE))
+	local best = -math.huge
+	for _, tb in f.tubes do
+		local pts = tubePath(tb)
+		for i = 1, #pts - 1 do
+			local a, b = pts[i], pts[i + 1]
+			local ab = b - a
+			local k = math.clamp((p - a):Dot(ab) / ab:Dot(ab), 0, 1)
+			local v = tb.r - (p - (a + ab * k)).Magnitude
+			if v > best then
+				best = v
+			end
+		end
+	end
+	return best
 end
 
 -- studs of clearance: > 0 is air, < 0 is rock, 0 is the wall
@@ -584,6 +671,12 @@ local function airness(p: Vector3): number
 	if math.noise(p.X * 0.02, o * 2, p.Z * 0.02) > 0.1 and (p.Y / s.ledgeSpacing) % 1 < 0.25 then
 		shelf = -s.ledgeDepth
 	end
+	-- lava tubes are round and almost smooth, the lava polished the walls on its way through, so
+	-- where a tube is the nearest wall the bumps are mostly left off
+	local tube = tubeClearance(p)
+	if tube > best then
+		return tube + rough * 0.15
+	end
 	return best + rough + shelf
 end
 
@@ -609,6 +702,11 @@ Cave.biomeAt = biomeAt
 local function materialAt(p: Vector3, isFloor: boolean): Enum.Material
 	local s = Cave.settings
 	local o = s.seed * 31.7
+
+	-- right round a lava tube: glowing cracked lava on the floor, dark basalt everywhere else
+	if tubeClearance(p) > -3 then
+		return if isFloor then Enum.Material.CrackedLava else Enum.Material.Basalt
+	end
 
 	local biome = biomeAt(p)
 	if biome == "crystal" then
@@ -1306,6 +1404,42 @@ local function placeBridge(center: Vector3, dir: Vector3)
 	Cave.bridges += 1
 end
 
+-- an orange light on the floor of a lava tube every 18 studs or so, so the tube glows
+local function placeTubeGlow(tb, min: Vector3)
+	local pts = tubePath(tb)
+	for i = 1, #pts - 1 do
+		local a, b = pts[i], pts[i + 1]
+		local steps = math.max(1, math.floor((b - a).Magnitude / 18))
+		for step = 0, steps - 1 do
+			local floor = a:Lerp(b, step / steps) - Vector3.new(0, tb.r - 1.5, 0)
+			local mine = floor.X >= min.X and floor.X < min.X + SIZE
+				and floor.Y >= min.Y and floor.Y < min.Y + SIZE
+				and floor.Z >= min.Z and floor.Z < min.Z + SIZE
+			if mine then
+				local model = Instance.new("Model")
+				model.Name = "LavaGlow"
+				local p = Instance.new("Part")
+				p.Name = "Light"
+				p.Anchored = true
+				p.CanCollide = false
+				p.CanQuery = false
+				p.CanTouch = false
+				p.Transparency = 1
+				p.Size = Vector3.one
+				p.CFrame = CFrame.new(floor)
+				local light = Instance.new("PointLight")
+				light.Color = Color3.fromRGB(255, 110, 40)
+				light.Range = 22
+				light.Brightness = 1.4
+				light.Shadows = false
+				light.Parent = p
+				p.Parent = model
+				keep(model, "Decor")
+			end
+		end
+	end
+end
+
 -- a torch on the shaft wall just above the ledge, every quarter turn, so you can see the spiral
 local function placeShaftTorches(sh, min: Vector3)
 	local s = Cave.settings
@@ -1731,6 +1865,9 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 	for _, sh in f.shafts do
 		placeShaftTorches(sh, min)
 	end
+	for _, tb in f.tubes do
+		placeTubeGlow(tb, min)
+	end
 
 	-- crystal and mushroom caves light themselves, lanterns only in plain rock
 	if hasNode(cy) then
@@ -2018,6 +2155,34 @@ function Cave.findChasm(near: Vector3?): Vector3?
 		end
 	end
 	warn("cave: no chasm found nearby, raise chasmChance or try another seed")
+	return nil
+end
+
+-- finds the nearest lava tube, builds around it and (in edit mode) looks along it from the middle
+function Cave.findTube(near: Vector3?): Vector3?
+	local c = near or Vector3.zero
+	local cell = Cave.settings.tubeCell
+	local gx0, gz0 = math.floor(c.X / cell), math.floor(c.Z / cell)
+	for r = 0, 6 do
+		for dx = -r, r do
+			for dz = -r, r do
+				if math.max(math.abs(dx), math.abs(dz)) == r then
+					local tb = tubeForCell(gx0 + dx, gz0 + dz)
+					if tb then
+						local pts = tubePath(tb)
+						local eye = pts[5]
+						Cave.preview(eye, 2)
+						if not RunService:IsRunning() then
+							Workspace.CurrentCamera.CFrame = CFrame.lookAt(eye, pts[6])
+						end
+						print("cave: lava tube at", eye)
+						return eye
+					end
+				end
+			end
+		end
+	end
+	warn("cave: no lava tube found nearby, raise tubeChance or try another seed")
 	return nil
 end
 

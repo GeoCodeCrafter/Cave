@@ -11,6 +11,7 @@ procedural mines for roblox. every server gets a new one. tunnels generate aroun
 - a new mine every server, seed shown in the corner so you can share a good one
 - terrain tunnels, chambers and the odd huge cavern with rock pillars, all one connected network so there's never a sealed-off pocket
 - deep chasms through several layers with rope bridges wherever a tunnel comes out
+- lava tubes deep down: long smooth round tunnels with a glowing cracked-lava floor
 - sinkholes: round shafts from the surface down through several layers, with a torch-lit spiral ledge you can walk down
 - underground rivers winding downhill between junctions, with real water, drifting foam, and waterfalls where they spill into a chasm
 - rock changes with depth: sandstone, limestone, slate, basalt, then lava at the bottom
