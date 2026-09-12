@@ -1138,21 +1138,19 @@ end
 
 -- dark and warm underground, a bit of haze so tunnels fade out, bloom so lanterns glow
 function Cave.applyLighting()
-	Lighting.ClockTime = 0
-	Lighting.Brightness = 0.4
+	-- afternoon sun on the surface. the rock shadows the sun and outdoor ambient only reaches places
+	-- that can see the sky, so the caves stay dark apart from light coming down sinkholes and mouths
+	Lighting.ClockTime = 14.5
+	Lighting.Brightness = 2
 	Lighting.Ambient = Color3.fromRGB(32, 30, 29)
-	Lighting.OutdoorAmbient = Color3.fromRGB(22, 21, 21)
-	Lighting.EnvironmentDiffuseScale = 0.15
+	Lighting.OutdoorAmbient = Color3.fromRGB(120, 122, 130)
+	Lighting.EnvironmentDiffuseScale = 0.4
 	Lighting.EnvironmentSpecularScale = 0.5
 	Lighting.GlobalShadows = true
 
 	-- properly dark underground, so the lanterns, crystals and your lamp actually matter
 	if Cave.settings.dark then
 		Lighting.Ambient = Color3.fromRGB(6, 6, 7)
-		Lighting.OutdoorAmbient = Color3.fromRGB(4, 4, 5)
-		Lighting.Brightness = 0
-		Lighting.EnvironmentDiffuseScale = 0.03
-		Lighting.EnvironmentSpecularScale = 0.3
 	end
 
 	-- still, clear water so you can see what's at the bottom of the pools
@@ -1165,12 +1163,13 @@ function Cave.applyLighting()
 	terrain.WaterWaveSpeed = 8
 
 	local atmosphere = getEffect("Atmosphere", "CaveAtmosphere") :: Atmosphere
-	atmosphere.Density = 0.38
+	-- starts as the daylight haze. underground each player's Atmosphere script swaps in the cave fog
+	atmosphere.Density = 0.3
 	atmosphere.Offset = 0
-	atmosphere.Color = Color3.fromRGB(52, 48, 46)
-	atmosphere.Decay = Color3.fromRGB(26, 24, 23)
+	atmosphere.Color = Color3.fromRGB(190, 205, 225)
+	atmosphere.Decay = Color3.fromRGB(110, 125, 150)
 	atmosphere.Glare = 0
-	atmosphere.Haze = 1.5
+	atmosphere.Haze = 1
 
 	local bloom = getEffect("BloomEffect", "CaveBloom") :: BloomEffect
 	bloom.Intensity = 0.7
