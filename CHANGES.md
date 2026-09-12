@@ -39,5 +39,6 @@
 - glowworms: cavern ceilings get clusters of tiny blue lights and a few hanging threads with a bead on the end
 - properly dark now away from lights. everyone gets a helmet lamp, and F throws a flare that bounces, sparks and burns for 20 seconds (5 each max, short cooldown)
 - cave walls: rough rock instead of smooth tubes (two layers of bumps), faint shelves along the walls in places, flatter floors with arched ceilings, and half-buried boulders. small sealed air bubbles get filled back in per chunk. (the caverns entry above said lone voxels already got filled, that was only ever in the sim, this is the first time the game actually does it)
+- atmosphere per biome: the fog, colour grade and floating particles fade to match where you're standing. violet sparkles in crystal caves, green spores with the mushrooms, cool droplets by the tide pools, embers down in the lava. new Atmosphere.client.luau does it, the server just tells it the biome
 - pickaxe was held backwards, head behind you. flipped the grip, and the swing is now a slow lift and a fast strike instead of the other way round
 - ores sit where the wall really is (blending the air/rock values) instead of the voxel edge, which was 1-3 studs behind the visible wall

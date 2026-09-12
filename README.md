@@ -32,7 +32,7 @@ or by hand:
 
 1. `src/Cave.luau` goes in ServerScriptService as a ModuleScript called `Cave`
 2. `src/Start.server.luau` goes next to it as a Script
-3. `src/Pickaxe.client.luau` goes in StarterPlayerScripts as a LocalScript
+3. `src/Pickaxe.client.luau` and `src/Atmosphere.client.luau` go in StarterPlayerScripts as LocalScripts
 4. set `Lighting.Technology` to Future
 
 to keep ore counts between sessions, publish the place and turn on Studio Access to API Services (File → Experience Settings → Security).

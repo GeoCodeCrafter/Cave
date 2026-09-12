@@ -85,3 +85,7 @@
 **22 · glowworms and the dark.** it's properly dark away from lights now, you've got a helmet lamp, and F throws a flare. caverns get glowworms on the ceiling, little blue dots with a few hanging threads. a bit sparse from far away, might bump them up
 
 ![glowworms on a cavern ceiling](progress/22-glowworms.png)
+
+**23 · rough walls.** the tunnels were perfect round tubes, which is most of why it looked basic. now the rock is bumpy, there's faint shelves along the walls in places, floors are flatter with arched ceilings, and there's boulders half sunk into the floor
+
+![rough walls and an arched ceiling by a rope bridge](progress/23-rough-walls.png)

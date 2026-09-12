@@ -2398,6 +2398,27 @@ function Cave.start()
 	Cave.applyColors()
 	Cave.applyLighting()
 	Cave.showSeed()
+
+	-- tell each player's Atmosphere script which biome they're standing in, it does the fog and particles
+	task.spawn(function()
+		while true do
+			for _, player in Players:GetPlayers() do
+				local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+				if root then
+					local p = root.Position
+					local biome = biomeAt(p)
+					if biome == "rock" and p.Y < Cave.settings.lavaBelow then
+						biome = "deep"
+					end
+					if player:GetAttribute("CaveBiome") ~= biome then
+						player:SetAttribute("CaveBiome", biome)
+					end
+				end
+			end
+			task.wait(0.5)
+		end
+	end)
+
 	Cave.enableLamps()
 	Cave.enableFlares()
 	Cave.enableMining()
