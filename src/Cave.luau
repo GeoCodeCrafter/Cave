@@ -39,6 +39,14 @@ Cave.settings = {
 	riverWidth = 10, -- 14 filled the whole passage, it looked like a flood not a river
 	riverClearance = 9, -- headroom above the riverbed
 	riverDepth = 2.5, -- how deep the water is
+	-- sinkholes: round shafts from the surface down through several layers, with a spiral ledge
+	shaftCell = 288, -- studs, at most one shaft per cell this size
+	shaftChance = 0.35,
+	shaftRadius = 13,
+	shaftDepth = 170,
+	ledgeWidth = 6, -- the spiral shelf running round the inside wall
+	ledgePitch = 28, -- studs it drops per full turn. 28 on a 13 stud shaft is about a 20 degree slope
+	ledgeThickness = 4.5,
 	southChance = 0.6, -- east links are always there, south ones only sometimes, so it's less of a grid
 	diagChance = 0.25,
 	rampChance = 0.45, -- per node, a sloped tunnel down to the level below
@@ -224,6 +232,31 @@ local function nodeAt(cx: number, cy: number, cz: number): Vector3
 	) * SIZE
 end
 
+-- the shaft in this big grid cell, if there is one. it's centred on a junction on the top layer, so
+-- it's always joined to the tunnels, and it breaks through the surface as a sinkhole
+local function shaftForCell(gx: number, gz: number)
+	local s = Cave.settings
+	if hash(gx, 9999, gz, 80) >= s.shaftChance then
+		return nil
+	end
+	local cell = s.shaftCell
+	local cx = math.floor((gx + 0.3 + hash(gx, 9999, gz, 81) * 0.4) * cell / SIZE)
+	local cz = math.floor((gz + 0.3 + hash(gx, 9999, gz, 82) * 0.4) * cell / SIZE)
+	local cy = math.floor(s.top / SIZE) - 1
+	if not hasNode(cy) then
+		return nil
+	end
+	local node = nodeAt(cx, cy, cz)
+	return {
+		c = Vector2.new(node.X, node.Z),
+		r = s.shaftRadius * (0.8 + hash(gx, 9999, gz, 83) * 0.4),
+		top = s.top - 2,
+		bottom = node.Y - s.shaftDepth * (0.75 + hash(gx, 9999, gz, 84) * 0.5),
+		spin = hash(gx, 9999, gz, 85) * math.pi * 2,
+		dir = if hash(gx, 9999, gz, 86) < 0.5 then 1 else -1,
+	}
+end
+
 -- the river that starts in this big grid cell, if there is one. it runs from one junction to
 -- another a few chunks away, winding between them, always downhill from the higher end
 local function riverForCell(gx: number, gz: number)
@@ -389,7 +422,31 @@ local function featuresFor(cx: number, cy: number, cz: number)
 		end
 	end
 
-	cached = { tunnels = tunnels, chambers = chambers, caverns = caverns, pillars = pillars, chasms = chasms, rivers = rivers }
+	local shafts = {}
+	local scell = s.shaftCell
+	for gx = math.floor(lo.X / scell) - 1, math.floor(hi.X / scell) + 1 do
+		for gz = math.floor(lo.Z / scell) - 1, math.floor(hi.Z / scell) + 1 do
+			local sh = shaftForCell(gx, gz)
+			if sh then
+				local pad = sh.r + s.wiggle * 1.5 + 4
+				if sh.c.X + pad >= lo.X and sh.c.X - pad <= hi.X and sh.c.Y + pad >= lo.Z and sh.c.Y - pad <= hi.Z
+					and sh.top + 4 >= lo.Y and sh.bottom <= hi.Y
+				then
+					table.insert(shafts, sh)
+				end
+			end
+		end
+	end
+
+	cached = {
+		tunnels = tunnels,
+		chambers = chambers,
+		caverns = caverns,
+		pillars = pillars,
+		chasms = chasms,
+		rivers = rivers,
+		shafts = shafts,
+	}
 	featureCache[key] = cached
 	return cached
 end
@@ -413,6 +470,16 @@ local function unwarp(target: Vector3): Vector3
 		p = target - (warp(p) - p)
 	end
 	return p
+end
+
+-- where a shaft actually is. shafts go straight down in real space, not in the bent tunnel space,
+-- or they wander sideways and the ledge blocks the view down. centred on where the junction it sits
+-- on really ended up, so it still opens into that junction's tunnels
+local function shaftCentre(sh): Vector3
+	if not sh.pc then
+		sh.pc = unwarp(Vector3.new(sh.c.X, sh.top - 40, sh.c.Y))
+	end
+	return sh.pc
 end
 
 -- studs of clearance: > 0 is air, < 0 is rock, 0 is the wall
@@ -457,6 +524,26 @@ local function airness(p: Vector3): number
 			local v = half - (ap - c.ab * k).Magnitude
 			-- round off the top and bottom so it doesn't end in a flat slab
 			v = math.min(v, (c.top - q.Y) * 0.5, (q.Y - c.bottom) * 0.5)
+			if v > best then
+				best = v
+			end
+		end
+	end
+	-- shafts: a round hole straight down. the spiral ledge is the part of the shaft that stays rock:
+	-- a shelf ledgeWidth deep round the wall, dropping ledgePitch studs per turn
+	for _, sh in f.shafts do
+		if p.Y < sh.top + 4 and p.Y > sh.bottom then
+			local c = shaftCentre(sh)
+			local d = Vector2.new(p.X - c.X, p.Z - c.Z)
+			local dist = d.Magnitude
+			local v = math.min(sh.r - dist, (p.Y - sh.bottom) * 0.5)
+			if v > 0 and dist > sh.r - s.ledgeWidth then
+				local angle = math.atan2(d.Y, d.X)
+				local turns = (sh.top - p.Y) / s.ledgePitch - sh.dir * (angle + sh.spin) / (2 * math.pi)
+				if (turns - math.floor(turns)) * s.ledgePitch < s.ledgeThickness then
+					v = -1
+				end
+			end
 			if v > best then
 				best = v
 			end
@@ -1219,6 +1306,54 @@ local function placeBridge(center: Vector3, dir: Vector3)
 	Cave.bridges += 1
 end
 
+-- a torch on the shaft wall just above the ledge, every quarter turn, so you can see the spiral
+local function placeShaftTorches(sh, min: Vector3)
+	local s = Cave.settings
+	local turnsTotal = (sh.top - sh.bottom) / s.ledgePitch
+	local t = 0.25
+	while t < turnsTotal do
+		-- the ledge's top surface is at this height for this angle
+		local y = sh.top - s.ledgePitch * t
+		local theta = sh.dir * 2 * math.pi * t - sh.spin
+		local c = shaftCentre(sh)
+		local at = Vector3.new(c.X + math.cos(theta) * (sh.r - 0.6), y + 3.5, c.Z + math.sin(theta) * (sh.r - 0.6))
+		local mine = at.X >= min.X and at.X < min.X + SIZE and at.Y >= min.Y and at.Y < min.Y + SIZE and at.Z >= min.Z and at.Z < min.Z + SIZE
+		if mine and y > sh.bottom + 6 then
+			local inward = Vector3.new(c.X, at.Y, c.Z) - at
+			inward = if inward.Magnitude > 0.1 then inward.Unit else Vector3.xAxis
+			local model = Instance.new("Model")
+			model.Name = "WallTorch"
+			local stick = Instance.new("Part")
+			stick.Name = "Stick"
+			stick.Anchored = true
+			stick.CanCollide = false
+			stick.Size = Vector3.new(0.35, 1.4, 0.35)
+			stick.CFrame = CFrame.lookAt(at, at + inward) * CFrame.Angles(math.rad(-25), 0, 0)
+			stick.Material = Enum.Material.Wood
+			stick.Color = Color3.fromRGB(84, 58, 38)
+			stick.Parent = model
+			local flame = Instance.new("Part")
+			flame.Name = "Flame"
+			flame.Shape = Enum.PartType.Ball
+			flame.Anchored = true
+			flame.CanCollide = false
+			flame.CastShadow = false
+			flame.Size = Vector3.one * 0.6
+			flame.CFrame = CFrame.new(at + inward * 0.4 + Vector3.new(0, 0.8, 0))
+			flame.Material = Enum.Material.Neon
+			flame.Color = Color3.fromRGB(255, 160, 70)
+			flame.Parent = model
+			local light = Instance.new("PointLight")
+			light.Color = Color3.fromRGB(255, 180, 110)
+			light.Range = 18
+			light.Brightness = 1.6
+			light.Parent = flame
+			keep(model, "Decor")
+		end
+		t += 0.25
+	end
+end
+
 -- is this point in the water part of a river channel
 local function riverWaterAt(p: Vector3, rivers): boolean
 	local q = warp(p)
@@ -1593,6 +1728,9 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 	for _, rv in f.rivers do
 		placeRiverDetails(rv, min)
 	end
+	for _, sh in f.shafts do
+		placeShaftTorches(sh, min)
+	end
 
 	-- crystal and mushroom caves light themselves, lanterns only in plain rock
 	if hasNode(cy) then
@@ -1880,6 +2018,35 @@ function Cave.findChasm(near: Vector3?): Vector3?
 		end
 	end
 	warn("cave: no chasm found nearby, raise chasmChance or try another seed")
+	return nil
+end
+
+-- finds the nearest shaft, builds around it and (in edit mode) looks down the spiral from near the top
+function Cave.findShaft(near: Vector3?): Vector3?
+	local c = near or Vector3.zero
+	local cell = Cave.settings.shaftCell
+	local gx0, gz0 = math.floor(c.X / cell), math.floor(c.Z / cell)
+	for r = 0, 6 do
+		for dx = -r, r do
+			for dz = -r, r do
+				if math.max(math.abs(dx), math.abs(dz)) == r then
+					local sh = shaftForCell(gx0 + dx, gz0 + dz)
+					if sh then
+						local centre = shaftCentre(sh)
+						local eye = Vector3.new(centre.X, sh.top - 24, centre.Z)
+						Cave.preview(eye, 3)
+						if not RunService:IsRunning() then
+							local down = Vector3.new(centre.X + sh.r * 0.8, sh.top - 70, centre.Z)
+							Workspace.CurrentCamera.CFrame = CFrame.lookAt(eye, down)
+						end
+						print("cave: shaft at", eye)
+						return eye
+					end
+				end
+			end
+		end
+	end
+	warn("cave: no shaft found nearby, raise shaftChance or try another seed")
 	return nil
 end
 
