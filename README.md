@@ -53,4 +53,12 @@ to keep ore counts between sessions, publish the place and turn on Studio Access
 - everything else is in `Cave.settings` at the top of `Cave.luau`. the ones worth trying first are `tunnelRadius`, `cavernChance`, `chasmChance`, `biomes` and the `ores` table (`hits` and `respawn`)
 - in edit mode, `Cave.preview()`, `Cave.findCavern()`, `Cave.findChasm()` and `Cave.findBiome("crystal")` build it without pressing play so you can fly around
 
+## tools
+
+- **live editor:** copy `plugin/CaveEditor.lua` into your local plugins folder (`%LOCALAPPDATA%\Roblox\Plugins` on windows, `~/Documents/Roblox/Plugins` on mac) and restart studio. Plugins > Cave > Editor opens a panel with a seed box and sliders, and every change rebuilds the cave round your camera. "print settings" puts the changed ones in the output
+- **debug views** (`CaveDebug`): the tunnel network drawn through the rock with junctions coloured by type (red hubs, purple caverns, yellow chambers, blue dead ends, green ramps), a cut-away that slices the terrain in half so you see the layers, and a map of the network from above in the editor panel
+- **timelapse** (`CaveTimelapse`): builds the mine chunk by chunk with the camera swinging round it and the front cut away, for recording. `require(game.ServerScriptService.CaveTimelapse).run(require(game.ServerScriptService.Cave))`, or the button in the editor
+
+all of it works in edit mode, no need to press play.
+
 every step with screenshots is in [PROGRESS.md](PROGRESS.md), changes are in [CHANGES.md](CHANGES.md). MIT licensed.

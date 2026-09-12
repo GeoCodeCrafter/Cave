@@ -8,6 +8,12 @@
       },
       "Start": {
         "$path": "src/Start.server.luau"
+      },
+      "CaveDebug": {
+        "$path": "src/CaveDebug.luau"
+      },
+      "CaveTimelapse": {
+        "$path": "src/CaveTimelapse.luau"
       }
     },
     "ReplicatedStorage": {
