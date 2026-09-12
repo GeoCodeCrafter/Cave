@@ -1357,6 +1357,19 @@ local function placeRiverDetails(rv, min: Vector3)
 						if count % 3 == 0 then
 							placeCurrent(surface, flow)
 						end
+						-- crossing an open cave there's no wall to hold the water in and it just looks like
+						-- a puddle, so raise a low bank of the local rock on that side. kept off the chunk
+						-- edges, the next chunk to load would slice it
+						local inner = qp.X > min.X + 3 and qp.X < min.X + SIZE - 3 and qp.Z > min.Z + 3 and qp.Z < min.Z + SIZE - 3
+						if inner then
+							local side = Vector3.new(-flow.Z, 0, flow.X)
+							for _, sgn in { -1, 1 } do
+								local at = unwarp(qp + side * sgn * (rv.halfW + 1.5) + Vector3.new(0, rv.depth * 0.6, 0))
+								if airness(at) > 1.5 then
+									terrain:FillBall(at, 3.2, materialAt(at, false))
+								end
+							end
+						end
 					elseif held(qp - flow * 6) then
 						placeWaterfall(surface, flow, rv.halfW)
 					end
@@ -1490,6 +1503,10 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 						if held and riverWaterAt(p, rf.rivers) then
 							materials[x][y][z] = Enum.Material.Water
 							occupancy[x][y][z] = 1
+							-- sand under the water so the bottom looks like a riverbed, not cave wall
+							if y > 1 and not air[x][y - 1][z] then
+								materials[x][y - 1][z] = Enum.Material.Sand
+							end
 						else
 							held = false
 						end

@@ -93,3 +93,7 @@
 **24 · rock texture.** swapped roblox's stock rock for a proper pbr texture (Stylized Rock PBR Material by Nezhull, public domain). put it on rock and slate first and couldn't see it anywhere, turns out the top layers where you actually walk are sandstone and limestone. on those too now and it's a different game
 
 ![a lantern-lit tunnel with the new rock texture](progress/24-rock-texture.png)
+
+**25 · checker boxes.** made the stalactites, crystals and ore into real meshes built from code, and they looked great in studio. in an actual game they were this: red and green checker boxes. meshes made on the server never reach players, i'd only checked the part arrived and not its shape. now the server puts down plain stand-ins and each player's computer builds the meshes itself. also found about 1 ore clump in 10 floating, the push off the wall was set for the old smooth tunnels, measured it and dropped it from 2 studs to 0.5
+
+![ore showing up as checker boxes in game](progress/25-checker-boxes.png)
