@@ -33,6 +33,12 @@ Cave.settings = {
 	chasmLength = 220,
 	chasmDepth = 170,
 	chasmWidth = 30, -- across the top, narrows towards the bottom
+	-- underground rivers: winding channels from one junction down to another, with real water
+	riverCell = 384, -- studs, at most one river per cell this size
+	riverChance = 0.6,
+	riverWidth = 14,
+	riverClearance = 9, -- headroom above the riverbed
+	riverDepth = 2.5, -- how deep the water is
 	southChance = 0.6, -- east links are always there, south ones only sometimes, so it's less of a grid
 	diagChance = 0.25,
 	rampChance = 0.45, -- per node, a sloped tunnel down to the level below
@@ -215,6 +221,48 @@ local function nodeAt(cx: number, cy: number, cz: number): Vector3
 	) * SIZE
 end
 
+-- the river that starts in this big grid cell, if there is one. it runs from one junction to
+-- another a few chunks away, winding between them, always downhill from the higher end
+local function riverForCell(gx: number, gz: number)
+	local s = Cave.settings
+	if hash(gx, 8888, gz, 60) >= s.riverChance then
+		return nil
+	end
+	local cell = s.riverCell
+	local cx = math.floor((gx + 0.3 + hash(gx, 8888, gz, 61) * 0.4) * cell / SIZE)
+	local cz = math.floor((gz + 0.3 + hash(gx, 8888, gz, 62) * 0.4) * cell / SIZE)
+	local cy = math.floor(s.top / SIZE) - 1 - math.floor(hash(gx, 8888, gz, 63) * 3)
+	if not hasNode(cy) then
+		return nil
+	end
+	local dx = (if hash(gx, 8888, gz, 64) < 0.5 then -1 else 1) * (3 + math.floor(hash(gx, 8888, gz, 65) * 3))
+	local dz = (if hash(gx, 8888, gz, 66) < 0.5 then -1 else 1) * (1 + math.floor(hash(gx, 8888, gz, 67) * 3))
+	local a, b = nodeAt(cx, cy, cz), nodeAt(cx + dx, cy, cz + dz)
+	if a.Y < b.Y then
+		a, b = b, a
+	end
+	local side = Vector3.new(-(b.Z - a.Z), 0, b.X - a.X).Unit
+	local amp = 18 + hash(gx, 8888, gz, 69) * 22
+	local phase = hash(gx, 8888, gz, 70) * math.pi * 2
+	local pts = {}
+	local n = 7
+	for i = 0, n do
+		local t = i / n
+		local base = a:Lerp(b, t)
+		-- the ends sit on the junctions, the middle swings side to side
+		local meander = math.sin(t * math.pi * 2 + phase) * amp * math.sin(t * math.pi)
+		-- the bed runs about 6 studs under the junctions, so the channel opens into their tunnels
+		local bed = (a.Y - 6) + (b.Y - a.Y) * t
+		table.insert(pts, Vector3.new(base.X, bed, base.Z) + side * meander)
+	end
+	return {
+		pts = pts,
+		halfW = s.riverWidth * (0.8 + hash(gx, 8888, gz, 68) * 0.4) / 2,
+		clearance = s.riverClearance,
+		depth = s.riverDepth,
+	}
+end
+
 -- every tunnel and chamber that could reach into this chunk
 local function featuresFor(cx: number, cy: number, cz: number)
 	local key = cx .. "," .. cy .. "," .. cz
@@ -317,7 +365,28 @@ local function featuresFor(cx: number, cy: number, cz: number)
 		end
 	end
 
-	cached = { tunnels = tunnels, chambers = chambers, caverns = caverns, pillars = pillars, chasms = chasms }
+	-- rivers can run a few cells from where they start, so look a couple of cells out
+	local rivers = {}
+	local rcell = s.riverCell
+	for gx = math.floor(lo.X / rcell) - 2, math.floor(hi.X / rcell) + 2 do
+		for gz = math.floor(lo.Z / rcell) - 2, math.floor(hi.Z / rcell) + 2 do
+			local rv = riverForCell(gx, gz)
+			if rv then
+				local mn, mx = rv.pts[1], rv.pts[1]
+				for _, p in rv.pts do
+					mn, mx = mn:Min(p), mx:Max(p)
+				end
+				local pad = rv.halfW + s.wiggle * 1.5 + rv.clearance
+				if mx.X + pad >= lo.X and mn.X - pad <= hi.X and mx.Z + pad >= lo.Z and mn.Z - pad <= hi.Z
+					and mx.Y + pad >= lo.Y and mn.Y - pad <= hi.Y
+				then
+					table.insert(rivers, rv)
+				end
+			end
+		end
+	end
+
+	cached = { tunnels = tunnels, chambers = chambers, caverns = caverns, pillars = pillars, chasms = chasms, rivers = rivers }
 	featureCache[key] = cached
 	return cached
 end
@@ -387,6 +456,24 @@ local function airness(p: Vector3): number
 			v = math.min(v, (c.top - q.Y) * 0.5, (q.Y - c.bottom) * 0.5)
 			if v > best then
 				best = v
+			end
+		end
+	end
+	-- river channels: flat floor just under the bed, headroom above it, as wide as the river
+	for _, rv in f.rivers do
+		local pts = rv.pts
+		for i = 1, #pts - 1 do
+			local a, b = pts[i], pts[i + 1]
+			local ab = Vector2.new(b.X - a.X, b.Z - a.Z)
+			local ap = Vector2.new(q.X - a.X, q.Z - a.Z)
+			local k = math.clamp(ap:Dot(ab) / ab:Dot(ab), 0, 1)
+			local dxz = (ap - ab * k).Magnitude
+			if dxz < rv.halfW + 4 then
+				local bed = a.Y + (b.Y - a.Y) * k
+				local v = math.min(rv.halfW - dxz, (q.Y - (bed - 1)) * 0.8, (bed + rv.clearance - q.Y) * 0.8)
+				if v > best then
+					best = v
+				end
 			end
 		end
 	end
@@ -1246,6 +1333,155 @@ local function placeBridge(center: Vector3, dir: Vector3)
 	Cave.bridges += 1
 end
 
+-- is this point in the water part of a river channel
+local function riverWaterAt(p: Vector3, rivers): boolean
+	local q = warp(p)
+	for _, rv in rivers do
+		local pts = rv.pts
+		for i = 1, #pts - 1 do
+			local a, b = pts[i], pts[i + 1]
+			local ab = Vector2.new(b.X - a.X, b.Z - a.Z)
+			local ap = Vector2.new(q.X - a.X, q.Z - a.Z)
+			local k = math.clamp(ap:Dot(ab) / ab:Dot(ab), 0, 1)
+			if (ap - ab * k).Magnitude < rv.halfW - 0.5 then
+				local bed = a.Y + (b.Y - a.Y) * k
+				if q.Y > bed - 1.5 and q.Y < bed + rv.depth then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
+
+-- foam flecks drifting downstream, so the water reads as moving
+local function placeCurrent(at: Vector3, flow: Vector3)
+	local model = Instance.new("Model")
+	model.Name = "Current"
+	local p = Instance.new("Part")
+	p.Name = "Emitter"
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.Transparency = 1
+	p.Size = Vector3.new(6, 0.2, 2)
+	p.CFrame = CFrame.lookAt(at, at + flow)
+	local e = Instance.new("ParticleEmitter")
+	e.Color = ColorSequence.new(Color3.fromRGB(225, 245, 255))
+	e.Size = NumberSequence.new(0.25, 0.05)
+	e.Transparency = NumberSequence.new(0.3, 1)
+	e.Lifetime = NumberRange.new(1.5, 2.5)
+	e.Speed = NumberRange.new(4, 6)
+	e.Rate = 8
+	e.SpreadAngle = Vector2.new(10, 2)
+	e.EmissionDirection = Enum.NormalId.Front
+	e.Shape = Enum.ParticleEmitterShape.Box
+	e.ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume
+	e.LightEmission = 0.3
+	e.Parent = p
+	p.Parent = model
+	keep(model, "Rivers")
+end
+
+-- where a river runs out over a drop: a sheet of falling water, streaks down it, spray at the bottom
+local function placeWaterfall(top: Vector3, flow: Vector3, halfW: number)
+	local drop = 0
+	while drop < 220 and airness(top - Vector3.new(0, drop + 2, 0)) > 0 do
+		drop += 2
+	end
+	if drop < 6 then
+		return
+	end
+	local width = halfW * 1.4
+	local model = Instance.new("Model")
+	model.Name = "Waterfall"
+
+	local mid = top + flow - Vector3.new(0, drop / 2, 0)
+	local sheet = Instance.new("Part")
+	sheet.Name = "Sheet"
+	sheet.Anchored = true
+	sheet.CanCollide = false
+	sheet.CanQuery = false
+	sheet.CastShadow = false
+	sheet.Material = Enum.Material.Glass
+	sheet.Transparency = 0.45
+	sheet.Color = Color3.fromRGB(170, 215, 240)
+	sheet.Size = Vector3.new(width, drop, 0.4)
+	sheet.CFrame = CFrame.lookAt(mid, mid + flow)
+	sheet.Parent = model
+
+	local streaks = Instance.new("ParticleEmitter")
+	streaks.Color = ColorSequence.new(Color3.fromRGB(235, 248, 255))
+	streaks.Size = NumberSequence.new(0.35, 0.1)
+	streaks.Transparency = NumberSequence.new(0.2, 1)
+	streaks.Lifetime = NumberRange.new(1, 2)
+	streaks.Speed = NumberRange.new(5, 10)
+	streaks.Acceleration = Vector3.new(0, -60, 0)
+	streaks.Rate = 30
+	streaks.EmissionDirection = Enum.NormalId.Bottom
+	streaks.Shape = Enum.ParticleEmitterShape.Box
+	streaks.ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume
+	streaks.Parent = sheet
+
+	local base = Instance.new("Part")
+	base.Name = "Spray"
+	base.Anchored = true
+	base.CanCollide = false
+	base.CanQuery = false
+	base.Transparency = 1
+	base.Size = Vector3.new(width, 1, width)
+	base.CFrame = CFrame.new(top + flow - Vector3.new(0, drop, 0))
+	base.Parent = model
+	local mist = Instance.new("ParticleEmitter")
+	mist.Color = ColorSequence.new(Color3.fromRGB(240, 250, 255))
+	mist.Size = NumberSequence.new(3, 6)
+	mist.Transparency = NumberSequence.new(0.7, 1)
+	mist.Lifetime = NumberRange.new(2, 4)
+	mist.Speed = NumberRange.new(1, 3)
+	mist.SpreadAngle = Vector2.new(180, 180)
+	mist.Rate = 12
+	mist.EmissionDirection = Enum.NormalId.Top
+	mist.Parent = base
+
+	keep(model, "Rivers")
+end
+
+-- currents along the water, and a waterfall wherever the river runs out over a drop. each spot
+-- belongs to exactly one chunk, the one its point on the river line falls in
+local function placeRiverDetails(rv, min: Vector3)
+	local pts = rv.pts
+	local count = 0
+	local function held(at: Vector3): boolean
+		return airness(unwarp(Vector3.new(at.X, at.Y - 3, at.Z))) < 0
+	end
+	for i = 1, #pts - 1 do
+		local a, b = pts[i], pts[i + 1]
+		local flat = Vector3.new(b.X - a.X, 0, b.Z - a.Z)
+		if flat.Magnitude > 0.1 then
+			local flow = flat.Unit
+			local steps = math.max(1, math.floor(flat.Magnitude / 6))
+			for step = 0, steps - 1 do
+				local qp = a:Lerp(b, step / steps)
+				local mine = qp.X >= min.X and qp.X < min.X + SIZE
+					and qp.Y >= min.Y and qp.Y < min.Y + SIZE
+					and qp.Z >= min.Z and qp.Z < min.Z + SIZE
+				if mine then
+					local surface = unwarp(qp + Vector3.new(0, rv.depth - 0.2, 0))
+					if held(qp) then
+						count += 1
+						if count % 3 == 0 then
+							placeCurrent(surface, flow)
+						end
+					elseif held(qp - flow * 6) then
+						placeWaterfall(surface, flow, rv.halfW)
+					end
+				end
+			end
+		end
+	end
+end
+
 local DIRS = { Vector3.xAxis, -Vector3.xAxis, Vector3.yAxis, -Vector3.yAxis, Vector3.zAxis, -Vector3.zAxis }
 
 -- ============================================================ chunks
@@ -1354,6 +1590,31 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 		end
 	end
 
+	-- river water: fills the bottom of any channel through here, but a cell only gets water if
+	-- the one under it is rock or water. roblox water doesn't flow, it'd hang over a drop
+	local rf = featuresFor(cx, cy, cz)
+	if #rf.rivers > 0 then
+		for x = 1, CHUNK do
+			for z = 1, CHUNK do
+				local under = min + Vector3.new((x - 0.5) * VOXEL, -VOXEL / 2, (z - 0.5) * VOXEL)
+				local held = not (air[x][1][z] and airness(under) > 0)
+				for y = 1, CHUNK do
+					if not air[x][y][z] then
+						held = true
+					else
+						local p = min + Vector3.new(x - 0.5, y - 0.5, z - 0.5) * VOXEL
+						if held and riverWaterAt(p, rf.rivers) then
+							materials[x][y][z] = Enum.Material.Water
+							occupancy[x][y][z] = 1
+						else
+							held = false
+						end
+					end
+				end
+			end
+		end
+	end
+
 	terrain:WriteVoxels(Region3.new(min, min + Vector3.one * SIZE), VOXEL, materials, occupancy)
 
 	-- put back any digging that happened here before the chunk was unloaded
@@ -1398,6 +1659,10 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 				end
 			end
 		end
+	end
+
+	for _, rv in f.rivers do
+		placeRiverDetails(rv, min)
 	end
 
 	-- crystal and mushroom caves light themselves, lanterns only in plain rock
@@ -1689,6 +1954,34 @@ function Cave.findChasm(near: Vector3?): Vector3?
 	return nil
 end
 
+-- finds the nearest river, builds around it and (in edit mode) looks downstream along it
+function Cave.findRiver(near: Vector3?): Vector3?
+	local c = near or Vector3.zero
+	local cell = Cave.settings.riverCell
+	local gx0, gz0 = math.floor(c.X / cell), math.floor(c.Z / cell)
+	for r = 0, 6 do
+		for dx = -r, r do
+			for dz = -r, r do
+				if math.max(math.abs(dx), math.abs(dz)) == r then
+					local rv = riverForCell(gx0 + dx, gz0 + dz)
+					if rv then
+						local eye = unwarp(rv.pts[3] + Vector3.new(0, rv.depth + 3, 0))
+						Cave.preview(eye, 2)
+						if not RunService:IsRunning() then
+							local ahead = unwarp(rv.pts[4] + Vector3.new(0, rv.depth + 3, 0))
+							Workspace.CurrentCamera.CFrame = CFrame.lookAt(eye, ahead)
+						end
+						print("cave: river at", eye)
+						return eye
+					end
+				end
+			end
+		end
+	end
+	warn("cave: no river found nearby, raise riverChance or try another seed")
+	return nil
+end
+
 -- jump to the nearest "crystal" / "mushroom" / "rock" area, builds around it and moves the camera there
 function Cave.findBiome(name: string, near: Vector3?): Vector3?
 	local c = near or Vector3.new(0, -60, 0)
@@ -1962,6 +2255,7 @@ function Cave.clear()
 	getFolder("Lanterns"):ClearAllChildren()
 	getFolder("Decor"):ClearAllChildren()
 	getFolder("Bridges"):ClearAllChildren()
+	getFolder("Rivers"):ClearAllChildren()
 	table.clear(done)
 	table.clear(chunkObjects)
 	table.clear(chunkCoords)
