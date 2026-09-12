@@ -2716,28 +2716,46 @@ function Cave.findSpawn(near: Vector3?): Vector3
 end
 
 -- for looking at it in edit mode, run from the command bar. puts the camera in a tunnel
-function Cave.preview(center: Vector3?, radius: number?): Vector3
-	local spot = Cave.findSpawn(center)
-	local r = radius or 2
+-- colours, textures, lighting and the prop meshes: everything a build needs before the first chunk
+function Cave.prepare()
 	Cave.applyColors()
 	Cave.applyTextures()
 	Cave.applyLighting()
 	-- build the prop meshes up front so chunk generation never stops to wait for them
 	buildMeshLib()
+end
+
+-- every chunk a build round this spot needs, nearest first: the caves r chunks round it, and if it's
+-- near the top the far ground layer too. the editor plugin and the timelapse build from this list
+function Cave.chunksAround(spot: Vector3, radius: number?, withGround: boolean?): { Vector3 }
+	local r = radius or 2
 	local cx, cy, cz = math.floor(spot.X / SIZE), math.floor(spot.Y / SIZE), math.floor(spot.Z / SIZE)
+	local list = {}
 	for dy = -2, 1 do
 		for dx = -r, r do
 			for dz = -r, r do
-				Cave.generateChunk(cx + dx, cy + dy, cz + dz)
+				table.insert(list, Vector3.new(cx + dx, cy + dy, cz + dz))
 			end
 		end
 	end
-	-- and the ground layer further out, same as in game
 	local groundCy = math.floor(Cave.settings.top / SIZE)
-	if cy >= groundCy - 2 then
+	if withGround ~= false and cy >= groundCy - 2 then
 		for _, c in farGround(cx, cz) do
-			Cave.generateChunk(c.X, c.Y, c.Z)
+			table.insert(list, c)
 		end
+	end
+	local middle = Vector3.new(cx, cy, cz)
+	table.sort(list, function(a, b)
+		return (a - middle).Magnitude < (b - middle).Magnitude
+	end)
+	return list
+end
+
+function Cave.preview(center: Vector3?, radius: number?): Vector3
+	local spot = Cave.findSpawn(center)
+	Cave.prepare()
+	for _, c in Cave.chunksAround(spot, radius) do
+		Cave.generateChunk(c.X, c.Y, c.Z)
 	end
 	if not RunService:IsRunning() then
 		Workspace.CurrentCamera.CFrame = CFrame.lookAt(spot, spot + Vector3.new(1, 0, 0))
@@ -3172,6 +3190,17 @@ function Cave.buildSpawnRoom(center: Vector3?): CFrame
 
 	return pad.CFrame + Vector3.new(0, 3, 0)
 end
+
+-- the bits of the network the debug views and the editor plugin need to see
+Cave.SIZE = SIZE
+Cave.VOXEL = VOXEL
+Cave.network = {
+	nodeAt = nodeAt,
+	hasNode = hasNode,
+	linkedTo = linkedTo,
+	nodeKind = nodeKind,
+	unwarp = unwarp,
+}
 
 -- numbers for this seed's network, in a block of regions around the spawn: how many junctions,
 -- dead ends, hubs and loops, how much tunnel, and whether it's all one piece
