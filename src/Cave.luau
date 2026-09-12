@@ -36,7 +36,7 @@ Cave.settings = {
 	-- underground rivers: winding channels from one junction down to another, with real water
 	riverCell = 384, -- studs, at most one river per cell this size
 	riverChance = 0.6,
-	riverWidth = 14,
+	riverWidth = 10, -- 14 filled the whole passage, it looked like a flood not a river
 	riverClearance = 9, -- headroom above the riverbed
 	riverDepth = 2.5, -- how deep the water is
 	southChance = 0.6, -- east links are always there, south ones only sometimes, so it's less of a grid
@@ -620,11 +620,13 @@ function Cave.applyLighting()
 	end
 
 	-- still, clear water so you can see what's at the bottom of the pools
-	terrain.WaterColor = Color3.fromRGB(34, 120, 130)
-	terrain.WaterTransparency = 0.85
-	terrain.WaterReflectance = 0.25
-	terrain.WaterWaveSize = 0
-	terrain.WaterWaveSpeed = 0
+	-- lighter and clearer, and barely reflecting. in a dark cave a reflective surface just mirrors the
+	-- dark and reads as a navy slab. small waves so it catches light and looks like it's moving
+	terrain.WaterColor = Color3.fromRGB(70, 170, 190)
+	terrain.WaterTransparency = 0.95
+	terrain.WaterReflectance = 0.1
+	terrain.WaterWaveSize = 0.12
+	terrain.WaterWaveSpeed = 8
 
 	local atmosphere = getEffect("Atmosphere", "CaveAtmosphere") :: Atmosphere
 	atmosphere.Density = 0.38
@@ -1253,17 +1255,40 @@ local function placeCurrent(at: Vector3, flow: Vector3)
 	p.CFrame = CFrame.lookAt(at, at + flow)
 	local e = Instance.new("ParticleEmitter")
 	e.Color = ColorSequence.new(Color3.fromRGB(225, 245, 255))
-	e.Size = NumberSequence.new(0.25, 0.05)
-	e.Transparency = NumberSequence.new(0.3, 1)
+	e.Size = NumberSequence.new(0.4, 0.08)
+	e.Transparency = NumberSequence.new(0.15, 1)
 	e.Lifetime = NumberRange.new(1.5, 2.5)
 	e.Speed = NumberRange.new(4, 6)
-	e.Rate = 8
+	e.Rate = 12
 	e.SpreadAngle = Vector2.new(10, 2)
 	e.EmissionDirection = Enum.NormalId.Front
 	e.Shape = Enum.ParticleEmitterShape.Box
 	e.ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume
-	e.LightEmission = 0.3
+	e.LightEmission = 0.8
 	e.Parent = p
+	p.Parent = model
+	keep(model, "Rivers")
+end
+
+-- a soft light just under the surface, so the river glows in the dark instead of vanishing
+local function placeRiverGlow(at: Vector3)
+	local model = Instance.new("Model")
+	model.Name = "RiverGlow"
+	local p = Instance.new("Part")
+	p.Name = "Light"
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.Transparency = 1
+	p.Size = Vector3.one
+	p.CFrame = CFrame.new(at - Vector3.new(0, 1.2, 0))
+	local light = Instance.new("PointLight")
+	light.Color = Color3.fromRGB(90, 200, 230)
+	light.Range = 16
+	light.Brightness = 0.9
+	light.Shadows = false
+	light.Parent = p
 	p.Parent = model
 	keep(model, "Rivers")
 end
@@ -1356,6 +1381,9 @@ local function placeRiverDetails(rv, min: Vector3)
 						count += 1
 						if count % 3 == 0 then
 							placeCurrent(surface, flow)
+						end
+						if count % 4 == 1 then
+							placeRiverGlow(surface)
 						end
 						-- crossing an open cave there's no wall to hold the water in and it just looks like
 						-- a puddle, so raise a low bank of the local rock on that side. kept off the chunk
