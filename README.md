@@ -17,6 +17,7 @@ procedural mines for roblox. every server gets a new one. tunnels generate aroun
 - geodes: hollow crystal-lined balls sealed in solid rock. a faint sparkle on a nearby wall is the only clue, you have to dig in
 - a surface over the top: rolling hills in the afternoon sun with grass and bare rock where it's steep. the sun comes down the sinkholes but the caves stay dark. cave mouths come out of the hillsides with a timber frame and a lantern
 - sinkholes: round shafts from the surface down through several layers, with a torch-lit spiral ledge you can walk down
+- skylights: thin cracks up to the grass that drop shafts of daylight into the caves near the top
 - underground rivers winding downhill between junctions, with real water, drifting foam, and waterfalls where they spill into a chasm
 - rock changes with depth: sandstone, limestone, slate, basalt, then lava at the bottom
 - biomes: plain rock with lanterns, crystal caves, mushroom caves and caves full of little tide pools

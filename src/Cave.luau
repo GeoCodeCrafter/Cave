@@ -70,6 +70,11 @@ Cave.settings = {
 		entranceChance = 0.7,
 		entranceRadius = 7,
 		entranceRun = 110, -- studs sideways from the junction to the mouth. about a 25 degree walk
+		-- skylights: narrow cracks from the roof of a big space near the top up to the grass, so
+		-- daylight falls into the caves
+		skylightCell = 160, -- studs, at most one per square this size
+		skylightChance = 0.45,
+		skylightRadius = 2.5,
 	},
 	-- layout: each region of chunks gets a random tree of tunnels, then a few extra links on top
 	regionSize = 4, -- chunks per side
@@ -828,6 +833,11 @@ local function entrancesNear(cx: number, cz: number): { any }
 	return list
 end
 
+-- skylights are worked out from the cave shape itself (is there a big space under here?), so while
+-- that's being checked they're left out, or finding one would need itself
+local skySkip = false
+local skylightsNear: (cx: number, cz: number) -> { any }
+
 local function airness(p: Vector3): number
 	local s = Cave.settings
 	local f = featuresFor(math.floor(p.X / SIZE), math.floor(p.Y / SIZE), math.floor(p.Z / SIZE))
@@ -926,6 +936,19 @@ local function airness(p: Vector3): number
 		best = math.min(best, (s.top - 6) - p.Y)
 	end
 	best = math.max(best, shaftBest)
+	-- skylights go up through the roof too, like the sinkholes. a narrow crack that wanders a little
+	if not skySkip and p.Y > s.top - 80 then
+		for _, sk in skylightsNear(math.floor(p.X / SIZE), math.floor(p.Z / SIZE)) do
+			if p.Y > sk.bottom - 3 and p.Y < sk.top then
+				local wander = math.sin(p.Y * 0.07 + sk.phase) * 1.2
+				local d = Vector2.new(p.X - sk.x - wander, p.Z - sk.z).Magnitude
+				local v = math.min(sk.r - d, (p.Y - (sk.bottom - 3)) * 0.5)
+				if v > best then
+					best = v
+				end
+			end
+		end
+	end
 	-- cave mouths, only near the top where they can be
 	if p.Y > s.top - SIZE - 12 then
 		for _, en in entrancesNear(math.floor(p.X / SIZE), math.floor(p.Z / SIZE)) do
@@ -967,6 +990,74 @@ local function airness(p: Vector3): number
 end
 
 Cave.airness = airness
+
+local skylightCache: { [string]: any } = {}
+local skylightChunks: { [string]: { any } } = {}
+
+-- the skylight in this square, if there is one: only where there's a big space with its roof
+-- within about 60 studs of the surface. the crack runs from that roof up to the grass
+local function skylightForCell(gx: number, gz: number)
+	local s = Cave.settings
+	local e = s.surface
+	local key = s.seed .. ":" .. gx .. "," .. gz
+	local cached = skylightCache[key]
+	if cached ~= nil then
+		return if cached then cached else nil
+	end
+	local found = nil
+	if hash(gx, 4444, gz, 130) < e.skylightChance then
+		local cell = e.skylightCell
+		local x = (gx + 0.2 + hash(gx, 4444, gz, 131) * 0.6) * cell
+		local z = (gz + 0.2 + hash(gx, 4444, gz, 132) * 0.6) * cell
+		skySkip = true
+		local bottom = nil
+		for y = s.top - 8, s.top - 70, -2 do
+			local p = Vector3.new(x, y, z)
+			if airness(p) > 1 then
+				-- only worth it over a big space, not a crawl
+				if airness(p - Vector3.new(0, 8, 0)) > 5 then
+					bottom = y
+				end
+				break
+			end
+		end
+		skySkip = false
+		if bottom then
+			found = {
+				x = x,
+				z = z,
+				bottom = bottom,
+				top = surfaceHeight(x, z) + 3,
+				r = e.skylightRadius * (0.8 + hash(gx, 4444, gz, 133) * 0.5),
+				phase = hash(gx, 4444, gz, 134) * math.pi * 2,
+			}
+		end
+	end
+	skylightCache[key] = found or false
+	return found
+end
+
+skylightsNear = function(cx: number, cz: number): { any }
+	local key = Cave.settings.seed .. ":" .. cx .. "," .. cz
+	local got = skylightChunks[key]
+	if got then
+		return got
+	end
+	local cell = Cave.settings.surface.skylightCell
+	local list = {}
+	for gx = math.floor((cx * SIZE - 8) / cell), math.floor(((cx + 1) * SIZE + 8) / cell) do
+		for gz = math.floor((cz * SIZE - 8) / cell), math.floor(((cz + 1) * SIZE + 8) / cell) do
+			local sk = skylightForCell(gx, gz)
+			if sk and sk.x + sk.r + 3 >= cx * SIZE and sk.x - sk.r - 3 <= (cx + 1) * SIZE
+				and sk.z + sk.r + 3 >= cz * SIZE and sk.z - sk.r - 3 <= (cz + 1) * SIZE
+			then
+				table.insert(list, sk)
+			end
+		end
+	end
+	skylightChunks[key] = list
+	return list
+end
 
 -- ============================================================ geodes
 --[[
@@ -1976,6 +2067,63 @@ local function placeEntrance(en, min: Vector3)
 	placeLantern(at + inward * 6)
 end
 
+-- under a skylight: a faint shaft of light down the crack with dust drifting in it, and a warm light
+-- where it lands. the real sun comes down the crack too, this makes sure it reads even when the sun
+-- is at an angle. built by the chunk the bottom of the crack is in
+local function placeSkylight(sk, min: Vector3)
+	if sk.x < min.X or sk.x >= min.X + SIZE or sk.z < min.Z or sk.z >= min.Z + SIZE
+		or sk.bottom < min.Y or sk.bottom >= min.Y + SIZE
+	then
+		return
+	end
+	local model = Instance.new("Model")
+	model.Name = "Skylight"
+	local len = sk.top - sk.bottom + 10
+	local ray = Instance.new("Part")
+	ray.Name = "Ray"
+	ray.Shape = Enum.PartType.Cylinder
+	ray.Anchored = true
+	ray.CanCollide = false
+	ray.CanQuery = false
+	ray.CastShadow = false
+	ray.Material = Enum.Material.Neon
+	ray.Color = Color3.fromRGB(255, 240, 205)
+	ray.Transparency = 0.94
+	-- a cylinder's axis is its x, turn it upright. it reaches 10 studs below the roof so the light
+	-- visibly falls into the space
+	ray.Size = Vector3.new(len, sk.r * 1.6, sk.r * 1.6)
+	ray.CFrame = CFrame.new(sk.x, sk.bottom - 10 + len / 2, sk.z) * CFrame.Angles(0, 0, math.pi / 2)
+	local dust = Instance.new("ParticleEmitter")
+	dust.Shape = Enum.ParticleEmitterShape.Box
+	dust.ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume
+	dust.Color = ColorSequence.new(Color3.fromRGB(255, 244, 220))
+	dust.Size = NumberSequence.new(0.08)
+	dust.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.3, 0.4), NumberSequenceKeypoint.new(1, 1) })
+	dust.Lifetime = NumberRange.new(4, 7)
+	dust.Rate = 6
+	dust.Speed = NumberRange.new(0.1, 0.3)
+	dust.SpreadAngle = Vector2.new(180, 180)
+	dust.LightEmission = 0.6
+	dust.Parent = ray
+	ray.Parent = model
+	local spot = Instance.new("Part")
+	spot.Name = "Glow"
+	spot.Anchored = true
+	spot.CanCollide = false
+	spot.CanQuery = false
+	spot.Transparency = 1
+	spot.Size = Vector3.one
+	spot.CFrame = CFrame.new(sk.x, sk.bottom - 12, sk.z)
+	local light = Instance.new("PointLight")
+	light.Color = Color3.fromRGB(255, 238, 205)
+	light.Range = 24
+	light.Brightness = 1.3
+	light.Shadows = false
+	light.Parent = spot
+	spot.Parent = model
+	keep(model, "Decor")
+end
+
 -- an orange light on the floor of a lava tube every 18 studs or so, so the tube glows
 local function placeTubeGlow(tb, min: Vector3)
 	local pts = tubePath(tb)
@@ -2544,6 +2692,9 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 		for _, en in entrancesNear(cx, cz) do
 			placeEntrance(en, min)
 		end
+		for _, sk in skylightsNear(cx, cz) do
+			placeSkylight(sk, min)
+		end
 	end
 
 	-- crystal and mushroom caves light themselves, lanterns only in plain rock
@@ -2913,6 +3064,33 @@ function Cave.findChasm(near: Vector3?): Vector3?
 		end
 	end
 	warn("cave: no chasm found nearby, raise chasmChance or try another seed")
+	return nil
+end
+
+-- finds the nearest skylight, builds round it and (in edit mode) looks up the crack from the floor
+function Cave.findSkylight(near: Vector3?): Vector3?
+	local c = near or Vector3.zero
+	local cell = Cave.settings.surface.skylightCell
+	local gx0, gz0 = math.floor(c.X / cell), math.floor(c.Z / cell)
+	for r = 0, 6 do
+		for dx = -r, r do
+			for dz = -r, r do
+				if math.max(math.abs(dx), math.abs(dz)) == r then
+					local sk = skylightForCell(gx0 + dx, gz0 + dz)
+					if sk then
+						local under = Vector3.new(sk.x + 14, sk.bottom - 12, sk.z + 6)
+						Cave.preview(under, 2)
+						if not RunService:IsRunning() then
+							Workspace.CurrentCamera.CFrame = CFrame.lookAt(under, Vector3.new(sk.x, sk.bottom + 6, sk.z))
+						end
+						print("cave: skylight at", sk.x, sk.bottom, sk.z)
+						return Vector3.new(sk.x, sk.bottom, sk.z)
+					end
+				end
+			end
+		end
+	end
+	warn("cave: no skylight found nearby, raise surface.skylightChance")
 	return nil
 end
 
@@ -3418,6 +3596,8 @@ function Cave.clear()
 	table.clear(layoutCache)
 	table.clear(entranceCache)
 	table.clear(entranceChunks)
+	table.clear(skylightCache)
+	table.clear(skylightChunks)
 	Cave.placed = 0
 	Cave.pools = 0
 	Cave.bridges = 0
