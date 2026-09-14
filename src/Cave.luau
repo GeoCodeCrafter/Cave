@@ -3516,6 +3516,14 @@ function Cave.buildSurfaceSpawn(near: Vector3?): CFrame
 			task.wait()
 		end
 	end
+	-- and round the junction the mouth tunnel runs down to. it's past the 2 chunks round the camp, and
+	-- without it you could see straight through the bottom of the hole to the sky
+	for i, ch in Cave.chunksAround(en.a, 1, false) do
+		Cave.generateChunk(ch.X, ch.Y, ch.Z)
+		if RunService:IsRunning() and i % 4 == 0 then
+			task.wait()
+		end
+	end
 	local sx, sy, sz = math.floor(spot.X / SIZE), math.floor(spot.Y / SIZE), math.floor(spot.Z / SIZE)
 	for dx = -2, 2 do
 		for dy = -2, 1 do
@@ -3574,19 +3582,42 @@ function Cave.buildSurfaceSpawn(near: Vector3?): CFrame
 	pad.Parent = camp
 
 	-- rails and sleepers from the platform down to the mouth, each sleeper on the ground under it
-	local prev = nil
-	for i = 0, 9 do
-		local p = spot - out * (7 + i * 2.2)
-		local y = surfaceHeight(p.X, p.Z) + 0.15
-		if i == 0 then
-			y = floorY - 0.9
+	-- where the floor really is under a point: down from `from` until the cave shape turns solid.
+	-- the grass height isn't enough, the mouth is carved out of it, and the first rails bridged the hole
+	local function floorUnder(x: number, z: number, from: number): number
+		local y = from
+		for _ = 1, 160 do
+			if airness(Vector3.new(x, y, z)) < 0 then
+				-- a little into the ground: roblox draws the surface up to a stud or so off the maths
+				return y - 0.3
+			end
+			y -= 0.5
 		end
-		local at = Vector3.new(p.X, y, p.Z)
-		block("Sleeper", Vector3.new(3.4, 0.2, 0.5), CFrame.lookAt(at, at - out), Enum.Material.Wood, darkWood)
+		return from
+	end
+	-- down the grass to the mouth, then on down the tunnel floor for 40 studs so they lead in
+	local route = {}
+	local startAt = spot - out * 7
+	local toMouth = Vector3.new(en.mouth.X - startAt.X, 0, en.mouth.Z - startAt.Z)
+	for d = 0, toMouth.Magnitude, 2.2 do
+		local p = startAt + toMouth.Unit * d
+		table.insert(route, Vector3.new(p.X, floorUnder(p.X, p.Z, surfaceHeight(p.X, p.Z) + 3), p.Z))
+	end
+	local down = en.a - en.mouth
+	for d = 2.2, 40, 2.2 do
+		local p = en.mouth + down.Unit * d
+		table.insert(route, Vector3.new(p.X, floorUnder(p.X, p.Z, p.Y + 2), p.Z))
+	end
+	route[1] = Vector3.new(route[1].X, floorY - 0.9, route[1].Z)
+	local prev = nil
+	for _, at in route do
+		local ahead = if prev then (at - prev) else -out
+		block("Sleeper", Vector3.new(3.4, 0.2, 0.5), CFrame.lookAt(at, at + Vector3.new(ahead.X, 0, ahead.Z)), Enum.Material.Wood, darkWood)
 		if prev then
+			local flat = Vector3.new(ahead.X, 0, ahead.Z)
+			local side = (if flat.Magnitude > 0.01 then flat.Unit else out):Cross(Vector3.yAxis).Unit
 			for _, x in { -1.2, 1.2 } do
-				local side = out:Cross(Vector3.yAxis).Unit * x
-				local a, b = prev + side + Vector3.new(0, 0.2, 0), at + side + Vector3.new(0, 0.2, 0)
+				local a, b = prev + side * x + Vector3.new(0, 0.2, 0), at + side * x + Vector3.new(0, 0.2, 0)
 				block("Rail", Vector3.new(0.25, 0.25, (b - a).Magnitude + 0.1), CFrame.lookAt((a + b) / 2, b), Enum.Material.Metal, metal)
 			end
 		end
