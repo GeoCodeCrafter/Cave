@@ -16,6 +16,7 @@
 		stop()      return true to stop early
 ]]
 local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
 
 local CaveTimelapse = {}
 
@@ -45,12 +46,19 @@ function CaveTimelapse.run(Cave, opts: { [string]: any }?): number
 	local radius = o.radius or 3
 	local delay = o.delay or 0.05
 	local cut = o.cutaway ~= false
-	local distance = o.distance or radius * SIZE * 2.3
-	local height = o.height or distance * 0.4
+	local distance = o.distance or radius * SIZE * 1.7
+	local height = o.height or distance * 0.45
 	local camera = Workspace.CurrentCamera
 
 	Cave.clear()
 	Cave.prepare()
+	-- the daylight haze hides anything a few hundred studs off, which is where the camera sits.
+	-- thin it out while this runs and put it back after
+	local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
+	local density = if atmosphere then atmosphere.Density else nil
+	if atmosphere then
+		atmosphere.Density = 0.03
+	end
 	-- with the cut on, chunks wholly on the camera's side (+z) are skipped
 	local plane = center.Z
 	local todo = {}
@@ -61,14 +69,19 @@ function CaveTimelapse.run(Cave, opts: { [string]: any }?): number
 	end
 
 	-- the camera: a slow swing in front of the cut, or a full orbit without one
+	-- studio's own edit camera keeps re-aiming at its focus point, so take it over completely and give
+	-- it back at the end
 	local running = true
 	local start = os.clock()
+	local cameraType = camera.CameraType
+	camera.CameraType = Enum.CameraType.Scriptable
 	task.spawn(function()
 		while running do
 			local t = os.clock() - start
 			local angle = if cut then math.sin(t * 0.25) * math.rad(35) else t * 0.15
 			local eye = center + Vector3.new(math.sin(angle) * distance, height, math.cos(angle) * distance)
 			camera.CFrame = CFrame.lookAt(eye, center)
+			camera.Focus = CFrame.new(center)
 			task.wait()
 		end
 	end)
@@ -97,6 +110,10 @@ function CaveTimelapse.run(Cave, opts: { [string]: any }?): number
 	end
 	task.wait(1.5)
 	running = false
+	camera.CameraType = cameraType
+	if atmosphere and density then
+		atmosphere.Density = density
+	end
 	return built
 end
 

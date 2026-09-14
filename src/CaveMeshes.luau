@@ -7,7 +7,7 @@ local AssetService = game:GetService("AssetService")
 local CaveMeshes = {}
 
 -- how many variants of each shape. the server picks one by number, so this has to match everywhere
-CaveMeshes.counts = { spike = 6, crystal = 4, lump = 8 }
+CaveMeshes.counts = { spike = 6, crystal = 4, lump = 8, outcrop = 8 }
 
 -- every triangle gets its own corners so the faces come out flat, which suits the stylized rock.
 -- flipped if it faces inwards, or it'd be invisible from outside
@@ -102,8 +102,63 @@ local function lumpShape(em: any, rng: Random)
 	end
 end
 
-local SHAPES = { spike = spikeShape, crystal = crystalShape, lump = lumpShape }
-local ORDER = { "spike", "crystal", "lump" }
+-- a flattish slab of rock round the origin, about 1 stud across and half that tall. unlike the
+-- others it's smooth shaded (shared corners with proper normals) and has texture coordinates, so it
+-- takes the same rock texture as the terrain instead of looking like flat coloured facets.
+-- if this version of roblox can't do normals or uvs it just skips them
+local function outcropShape(em: any, rng: Random)
+	local lat, lon = 8, 14
+	local off = rng:NextNumber(0, 100)
+	local fancy = pcall(function()
+		em:AddUV(Vector2.zero)
+		em:AddNormal(Vector3.yAxis)
+	end)
+	local verts, pts = {}, {}
+	for u = 0, lat do
+		verts[u], pts[u] = {}, {}
+		for v = 0, lon - 1 do
+			local theta = u / lat * math.pi
+			local phi = v / lon * math.pi * 2
+			local dir = Vector3.new(math.sin(theta) * math.cos(phi), math.cos(theta), math.sin(theta) * math.sin(phi))
+			local bump = 1 + math.noise(dir.X * 1.3 + off, dir.Y * 1.3, dir.Z * 1.3) * 0.45
+				+ math.noise(dir.X * 3.1, dir.Y * 3.1 + off, dir.Z * 3.1) * 0.12
+			local p = Vector3.new(dir.X * 0.5, dir.Y * 0.3, dir.Z * 0.5) * bump
+			pts[u][v] = p
+			local vert = { id = em:AddVertex(p) }
+			if fancy then
+				-- the normal of a squashed ball, and the texture laid on from above
+				vert.n = em:AddNormal(Vector3.new(p.X / 0.25, p.Y / 0.09, p.Z / 0.25).Unit)
+				vert.uv = em:AddUV(Vector2.new(p.X * 1.5 + 0.5, p.Z * 1.5 + 0.5))
+			end
+			verts[u][v] = vert
+		end
+	end
+	local function tri(a, b, c, pa: Vector3, pb: Vector3, pc: Vector3)
+		local n = (pb - pa):Cross(pc - pa)
+		if n.Magnitude < 1e-7 then
+			return
+		end
+		if n:Dot(pa + pb + pc) < 0 then
+			b, c = c, b
+		end
+		local face = em:AddTriangle(a.id, b.id, c.id)
+		if fancy then
+			em:SetFaceNormals(face, { a.n, b.n, c.n })
+			em:SetFaceUVs(face, { a.uv, b.uv, c.uv })
+		end
+	end
+	for u = 0, lat - 1 do
+		for v = 0, lon - 1 do
+			local w = (v + 1) % lon
+			tri(verts[u][v], verts[u + 1][v], verts[u + 1][w], pts[u][v], pts[u + 1][v], pts[u + 1][w])
+			tri(verts[u][v], verts[u + 1][w], verts[u][w], pts[u][v], pts[u + 1][w], pts[u][w])
+		end
+	end
+end
+
+local SHAPES = { spike = spikeShape, crystal = crystalShape, lump = lumpShape, outcrop = outcropShape }
+-- new shapes go on the end, so the ones before keep the same random numbers and look the same
+local ORDER = { "spike", "crystal", "lump", "outcrop" }
 
 local lib: { [string]: { MeshPart } }? = nil
 local tried = false

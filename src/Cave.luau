@@ -18,13 +18,20 @@ local SIZE = CHUNK * VOXEL
 
 Cave.settings = {
 	seed = 1,
-	tunnelRadius = 8,
+	tunnelRadius = 9,
+	-- galleries: a slow noise field that opens stretches of passage right out, so it reads as caves
+	-- and not tunnels. it only adds width round the same network, so everything still connects
+	galleryWiden = 20, -- extra studs of radius where the field is strongest
+	galleryScale = 0.012, -- smaller = longer galleries
+	-- rooms partway along passages, irregular, so a passage opens out before the next junction
+	roomChance = 0.45, -- per passage
+	roomRadius = 15,
 	wiggle = 12, -- how far tunnels bend away from a straight line
 	bend = 0.013, -- how tight the bends are. much above 0.02 and tunnels tear into separate pockets
 	minRadius = 5.5, -- too thin and the terrain grid breaks tunnels apart
-	chamberChance = 0.5, -- per node
-	chamberRadius = 22,
-	cavernChance = 0.07, -- per node, a huge flattened dome with rock pillars instead of a chamber
+	chamberChance = 0.65, -- per node
+	chamberRadius = 26,
+	cavernChance = 0.2, -- per junction with 3+ tunnels, a huge flattened dome with rock pillars instead of a chamber
 	cavernRadius = 46,
 	cavernFlatten = 0.55, -- height compared to width
 	-- chasms: long deep ravines through several layers, with rope bridges where tunnels meet them
@@ -144,8 +151,7 @@ Cave.settings = {
 	glowwormChance = 0.3, -- per cavern ceiling voxel. tiny blue lights and hanging threads
 	glowwormColor = Color3.fromRGB(120, 205, 255),
 	roughness = 2.2, -- studs of bumps on the cave walls. 0 = smooth tubes
-	ledgeSpacing = 7, -- studs between the faint shelves along the walls
-	ledgeDepth = 1.2,
+	outcropChance = 0.03, -- per rock voxel on a surface, a slab of textured rock set into it
 	floorSquash = 1.7, -- how much flatter the floor is than the ceiling. 1 = round tubes
 	boulderChance = 0.012, -- per floor voxel, half-buried boulders
 	-- custom rock textures: base material name = MaterialVariant name (the variants live in
@@ -516,7 +522,7 @@ local function featuresFor(cx: number, cy: number, cz: number)
 
 	local s = Cave.settings
 	local tunnels, chambers, caverns, pillars = {}, {}, {}, {}
-	local reach = math.max(s.chamberRadius * 1.3, s.cavernRadius * 1.2) + s.wiggle + VOXEL + s.tunnelRadius * 1.4
+	local reach = math.max(s.chamberRadius * 1.3, s.cavernRadius * 1.2) + s.wiggle + VOXEL + s.tunnelRadius * 1.4 + s.galleryWiden
 	local lo = Vector3.new(cx, cy, cz) * SIZE - Vector3.one * reach
 	local hi = Vector3.new(cx + 1, cy + 1, cz + 1) * SIZE + Vector3.one * reach
 
@@ -535,6 +541,13 @@ local function featuresFor(cx: number, cy: number, cz: number)
 							local b = nodeAt(x + step.X, y + step.Y, z + step.Z)
 							if touches(a, b) then
 								table.insert(tunnels, { a = a, ab = b - a, len2 = (b - a):Dot(b - a) })
+							end
+							-- a room partway along some passages, so they open out instead of staying one width
+							if hash(x, y, z, 300 + d) < s.roomChance then
+								local at = a:Lerp(b, 0.3 + hash(x, y, z, 310 + d) * 0.4)
+								if touches(at, at) then
+									table.insert(chambers, { c = at, r = s.roomRadius * (0.7 + hash(x, y, z, 320 + d) * 0.6) })
+								end
 							end
 						end
 					end
@@ -816,7 +829,10 @@ local function airness(p: Vector3): number
 	local f = featuresFor(math.floor(p.X / SIZE), math.floor(p.Y / SIZE), math.floor(p.Z / SIZE))
 	local o = s.seed * 17.13
 	local q = warp(p)
+	-- galleries: where the slow field is up, the passage opens right out
+	local gallery = math.max(0, math.noise(p.X * s.galleryScale + o, p.Y * s.galleryScale, p.Z * s.galleryScale - o) * 1.6)
 	local r = math.max(s.minRadius, s.tunnelRadius * (1 + math.noise(p.X * 0.05, p.Y * 0.05, p.Z * 0.05 - o) * 0.4))
+		+ gallery * s.galleryWiden
 
 	local best = -math.huge
 	local shaftBest = -math.huge -- kept apart so the roof below doesn't cap the sinkholes
@@ -832,7 +848,9 @@ local function airness(p: Vector3): number
 	end
 	for _, c in f.chambers do
 		local d = q - c.c
-		local v = c.r - Vector3.new(d.X, d.Y * (if d.Y < 0 then s.floorSquash else 0.85), d.Z).Magnitude
+		-- lumpy rather than a clean ball, so rooms don't look like bubbles
+		local cr = c.r * (1 + math.noise(q.X * 0.05, q.Y * 0.05 + o, q.Z * 0.05) * 0.35)
+		local v = cr - Vector3.new(d.X, d.Y * (if d.Y < 0 then s.floorSquash else 0.85), d.Z).Magnitude
 		if v > best then
 			best = v
 		end
@@ -925,14 +943,11 @@ local function airness(p: Vector3): number
 			end
 		end
 	end
-	-- rough rock instead of smooth tubes: two layers of small bumps, and in some areas faint
-	-- shelves running along the walls like layered rock
-	local rough = math.noise(p.X * 0.11, p.Y * 0.11 + o, p.Z * 0.11) * s.roughness
-		+ math.noise(p.X * 0.29 + o, p.Y * 0.29, p.Z * 0.29) * s.roughness * 0.45
-	local shelf = 0
-	if math.noise(p.X * 0.02, o * 2, p.Z * 0.02) > 0.1 and (p.Y / s.ledgeSpacing) % 1 < 0.25 then
-		shelf = -s.ledgeDepth
-	end
+	-- rough rock: big slow lumps plus a finer layer, nothing much under 9 studs across. the terrain
+	-- grid is 4 studs, and the old 3 stud bumps and thin shelves came out as jagged random facets
+	-- that made it look like an old game. the fine detail comes from the rock outcrops instead
+	local rough = math.noise(p.X * 0.045, p.Y * 0.045 + o, p.Z * 0.045) * s.roughness * 1.6
+		+ math.noise(p.X * 0.11 + o, p.Y * 0.11, p.Z * 0.11) * s.roughness * 0.6
 	-- lava tubes are round and almost smooth, the lava polished the walls on its way through, so
 	-- where a tube is the nearest wall the bumps are mostly left off
 	local tube = tubeClearance(p)
@@ -942,9 +957,9 @@ local function airness(p: Vector3): number
 	-- open sky above the ground. a bit of the roughness so the hills aren't perfectly smooth
 	if p.Y > s.top - 8 then
 		local sky = p.Y - surfaceHeight(p.X, p.Z)
-		return math.max(best + rough + shelf, sky + rough * 0.3)
+		return math.max(best + rough, sky + rough * 0.3)
 	end
-	return best + rough + shelf
+	return best + rough
 end
 
 Cave.airness = airness
@@ -1626,6 +1641,30 @@ local function placeRubble(floor: Vector3, color: Color3, rng: Random)
 			* CFrame.Angles(rng:NextNumber(0, 6.28), rng:NextNumber(0, 6.28), rng:NextNumber(0, 6.28))
 		part.Parent = model
 	end
+	keep(model, "Decor")
+end
+
+-- a slab of rock set into a wall, floor or ceiling, in the same rock and colour as round it, and
+-- textured like the terrain. breaks up the smooth stretches between the big shapes
+local function placeOutcrop(wall: Vector3, normal: Vector3, p: Vector3, rng: Random)
+	local rock = newMesh("outcrop", rng)
+	if not rock then
+		return
+	end
+	local size = rng:NextNumber(3, 7.5)
+	rock.Name = "Outcrop"
+	rock.Anchored = true
+	rock.CanCollide = false
+	rock.Material = materialAt(p, false)
+	rock.Color = rockColor(p):Lerp(Color3.new(0, 0, 0), rng:NextNumber(0, 0.15))
+	rock.Size = Vector3.new(size, size * rng:NextNumber(0.35, 0.6), size * rng:NextNumber(0.7, 1.1))
+	-- its flat side faces out of the surface, with about a third of it sticking out
+	rock.CFrame = safeLookAt(wall - normal * rock.Size.Y * 0.15, normal)
+		* CFrame.Angles(-math.pi / 2, 0, 0)
+		* CFrame.Angles(0, rng:NextNumber(0, math.pi * 2), 0)
+	local model = Instance.new("Model")
+	model.Name = "Outcrop"
+	rock.Parent = model
 	keep(model, "Decor")
 end
 
@@ -2514,6 +2553,11 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 					end
 					if open then
 						local p = min + Vector3.new(x - 0.5, y - 0.5, z - 0.5) * VOXEL
+						-- rock slabs in the surfaces, everywhere but the lava tubes (those stay smooth)
+						if rng:NextNumber() < s.outcropChance and tubeClearance(p) < -3 then
+							local wall, normal = wallBetween(p, open)
+							placeOutcrop(wall, normal, p, rng)
+						end
 						local ore = pickOre(p.Y, rng)
 						if ore then
 							local wall, normal = wallBetween(p, open)

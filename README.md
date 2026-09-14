@@ -9,7 +9,8 @@ procedural mines for roblox. every server gets a new one. tunnels generate aroun
 ## what's in it
 
 - a new mine every server, seed shown in the corner so you can share a good one
-- terrain tunnels, chambers and the odd huge cavern with rock pillars, all one connected network so there's never a sealed-off pocket
+- terrain caves, not just tunnels: passages that open out into wide galleries, rooms along the way, chambers and huge caverns with rock pillars, all one connected network so there's never a sealed-off pocket
+- textured rock slabs set into the walls, floors and ceilings, so the terrain isn't just smooth blobs
 - the network's a random tree per region with loops added on top, so you get dead ends, hubs where 4+ tunnels meet, and more than one way round. `Cave.stats()` prints the numbers for the current seed
 - deep chasms through several layers with rope bridges wherever a tunnel comes out
 - lava tubes deep down: long smooth round tunnels with a glowing cracked-lava floor
