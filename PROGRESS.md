@@ -149,3 +149,7 @@
 **38 · where the biomes meet.** one of the new big caves with glowing mushrooms on one side, plain rock in the middle and crystals on the other, and a pool in front
 
 ![mushroom, rock and crystal caves meeting in one big cave](progress/38-biomes-meet.png)
+
+**39 · starting outside.** you spawn on the hills now, on a little platform facing a cave mouth, with the controls on a sign and rails running down into it. pressing play had actually stopped working before this: the old spawn room built 1337 chunks with no pause and roblox killed the script. first go at the rails floated them straight over the hole, they follow the real floor down into the tunnel now
+
+![the spawn platform in front of a cave mouth](progress/39-surface-spawn.png)
