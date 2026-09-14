@@ -3257,7 +3257,17 @@ end
 -- a dug-out room with a plank floor, support beams, a lantern and a real SpawnLocation.
 -- it sits on a node so the tunnels always connect to it. returns where players spawn
 function Cave.buildSpawnRoom(center: Vector3?): CFrame
-	local spot = Cave.preview(center, 2)
+	-- only the caves round the room before anyone spawns. this used to call preview(), which since
+	-- the surface also builds the ground 10 chunks out: hundreds of chunks with no pause, and roblox
+	-- stopped the start script before anyone spawned. the ground loads round you once you're in
+	local spot = Cave.findSpawn(center)
+	Cave.prepare()
+	for i, c in Cave.chunksAround(spot, 2, false) do
+		Cave.generateChunk(c.X, c.Y, c.Z)
+		if RunService:IsRunning() and i % 4 == 0 then
+			task.wait()
+		end
+	end
 	local floorY = spot.Y - 3
 
 	-- the spawn room's chunks never get unloaded
@@ -3460,6 +3470,192 @@ function Cave.buildSpawnRoom(center: Vector3?): CFrame
 		end
 	end
 
+	return pad.CFrame + Vector3.new(0, 3, 0)
+end
+
+-- the spawn: outside on the hills a short walk from the nearest cave mouth, facing it. a plank
+-- platform on legs (so you're not stood on a slope), the controls on a signpost, crates, a lantern
+-- post, and rails running down into the mouth, which has lanterns and a bit of easy ore just inside.
+-- only the ground round it and the caves just under it get built before anyone spawns, the far
+-- hills load round you after. falls back to the underground room if there's no mouth nearby
+function Cave.buildSurfaceSpawn(near: Vector3?): CFrame
+	local c = near or Vector3.zero
+	local cell = Cave.settings.surface.entranceCell
+	local gx0, gz0 = math.floor(c.X / cell), math.floor(c.Z / cell)
+	local en = nil
+	for r = 0, 6 do
+		for dx = -r, r do
+			for dz = -r, r do
+				if not en and math.max(math.abs(dx), math.abs(dz)) == r then
+					en = entranceForCell(gx0 + dx, gz0 + dz)
+				end
+			end
+		end
+		if en then
+			break
+		end
+	end
+	if not en then
+		return Cave.buildSpawnRoom(near)
+	end
+
+	local out = en.out
+	local centre = en.mouth + out * 26
+	-- the platform sits on the highest ground under it, on legs where the slope drops away
+	local top = surfaceHeight(centre.X, centre.Z)
+	for _, o in { Vector3.new(7, 0, 7), Vector3.new(-7, 0, 7), Vector3.new(7, 0, -7), Vector3.new(-7, 0, -7) } do
+		top = math.max(top, surfaceHeight(centre.X + o.X, centre.Z + o.Z))
+	end
+	local floorY = top + 0.6
+	local spot = Vector3.new(centre.X, floorY, centre.Z)
+
+	Cave.prepare()
+	for i, ch in Cave.chunksAround(spot, 2, false) do
+		Cave.generateChunk(ch.X, ch.Y, ch.Z)
+		if RunService:IsRunning() and i % 4 == 0 then
+			task.wait()
+		end
+	end
+	local sx, sy, sz = math.floor(spot.X / SIZE), math.floor(spot.Y / SIZE), math.floor(spot.Z / SIZE)
+	for dx = -2, 2 do
+		for dy = -2, 1 do
+			for dz = -2, 2 do
+				pinned[chunkKey(sx + dx, sy + dy, sz + dz)] = true
+			end
+		end
+	end
+
+	for _, name in { "SpawnRoom", "SurfaceSpawn" } do
+		local old = Workspace:FindFirstChild(name)
+		if old then
+			old:Destroy()
+		end
+	end
+	local camp = Instance.new("Model")
+	camp.Name = "SurfaceSpawn"
+	local wood = Color3.fromRGB(110, 78, 50)
+	local darkWood = Color3.fromRGB(84, 58, 38)
+	local crate = Color3.fromRGB(122, 90, 58)
+	local metal = Color3.fromRGB(62, 62, 66)
+	local function block(name: string, partSize: Vector3, cframe: CFrame, material: Enum.Material, color: Color3)
+		local part = Instance.new("Part")
+		part.Name = name
+		part.Anchored = true
+		part.Size = partSize
+		part.CFrame = cframe
+		part.Material = material
+		part.Color = color
+		part.Parent = camp
+		return part
+	end
+
+	-- camp-local frame: -z points at the mouth, +x is to your right as you face it
+	local base = CFrame.lookAt(spot, spot - out)
+	block("Platform", Vector3.new(14, 1, 14), base * CFrame.new(0, -0.5, 0), Enum.Material.WoodPlanks, wood)
+	for _, corner in { Vector3.new(6.4, 0, 6.4), Vector3.new(-6.4, 0, 6.4), Vector3.new(6.4, 0, -6.4), Vector3.new(-6.4, 0, -6.4) } do
+		local at = base * CFrame.new(corner)
+		local ground = surfaceHeight(at.X, at.Z)
+		local drop = floorY - ground
+		if drop > 0.8 then
+			block("Leg", Vector3.new(0.9, drop + 1, 0.9), CFrame.new(at.X, ground + (drop + 1) / 2 - 1, at.Z), Enum.Material.Wood, darkWood)
+		end
+	end
+
+	local pad = Instance.new("SpawnLocation")
+	pad.Name = "CaveSpawn"
+	pad.Anchored = true
+	pad.Neutral = true
+	pad.Duration = 0
+	pad.Size = Vector3.new(6, 0.4, 6)
+	-- you spawn facing the way the pad faces, which is at the mouth
+	pad.CFrame = base * CFrame.new(0, 0.2, 1.5)
+	pad.Material = Enum.Material.Slate
+	pad.Color = Color3.fromRGB(70, 62, 56)
+	pad.Parent = camp
+
+	-- rails and sleepers from the platform down to the mouth, each sleeper on the ground under it
+	local prev = nil
+	for i = 0, 9 do
+		local p = spot - out * (7 + i * 2.2)
+		local y = surfaceHeight(p.X, p.Z) + 0.15
+		if i == 0 then
+			y = floorY - 0.9
+		end
+		local at = Vector3.new(p.X, y, p.Z)
+		block("Sleeper", Vector3.new(3.4, 0.2, 0.5), CFrame.lookAt(at, at - out), Enum.Material.Wood, darkWood)
+		if prev then
+			for _, x in { -1.2, 1.2 } do
+				local side = out:Cross(Vector3.yAxis).Unit * x
+				local a, b = prev + side + Vector3.new(0, 0.2, 0), at + side + Vector3.new(0, 0.2, 0)
+				block("Rail", Vector3.new(0.25, 0.25, (b - a).Magnitude + 0.1), CFrame.lookAt((a + b) / 2, b), Enum.Material.Metal, metal)
+			end
+		end
+		prev = at
+	end
+
+	-- crates on the back corner, and the controls on a signpost at the front, facing the pad
+	block("Crate", Vector3.new(3, 3, 3), base * CFrame.new(4.5, 1.5, 4.5), Enum.Material.WoodPlanks, crate)
+	block("Crate", Vector3.new(2.4, 2.4, 2.4), base * CFrame.new(4.6, 4.2, 4.3) * CFrame.Angles(0, 0.4, 0), Enum.Material.WoodPlanks, crate)
+	block("Crate", Vector3.new(2.4, 2.4, 2.4), base * CFrame.new(1.8, 1.2, 5) * CFrame.Angles(0, -0.3, 0), Enum.Material.WoodPlanks, crate)
+	block("SignPost", Vector3.new(0.4, 3.4, 0.4), base * CFrame.new(-4.5, 1.7, -4.5), Enum.Material.Wood, darkWood)
+	local sign = block("Sign", Vector3.new(5, 2.8, 0.3), base * CFrame.new(-4.5, 4, -4.5) * CFrame.Angles(0, math.pi + 0.5, 0), Enum.Material.WoodPlanks, crate)
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 60
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.SourceSansBold
+	label.TextScaled = true
+	label.TextColor3 = Color3.fromRGB(250, 236, 205)
+	label.Text = "the mine's down there\n\nhold click with the pickaxe\nto mine ore and dig rock\nF to throw a flare"
+	label.Parent = gui
+	gui.Parent = sign
+
+	-- a lantern post on the front corner, for when you come back up at night-ish depths
+	block("LanternPost", Vector3.new(0.5, 6, 0.5), base * CFrame.new(4.5, 3, -4.5), Enum.Material.Wood, darkWood)
+	block("LanternArm", Vector3.new(0.3, 0.3, 1.6), base * CFrame.new(4.5, 5.8, -5.2), Enum.Material.Wood, darkWood)
+	local lamp = block("Lantern", Vector3.new(0.8, 1.1, 0.8), base * CFrame.new(4.5, 5, -5.9), Enum.Material.Neon, Cave.settings.lantern.color)
+	lamp.CanCollide = false
+	local glow = Instance.new("PointLight")
+	glow.Color = Cave.settings.lantern.color
+	glow.Range = 20
+	glow.Brightness = 1.2
+	glow.Parent = lamp
+
+	camp.Parent = Workspace
+
+	-- lanterns down the mouth tunnel, and a little easy ore just inside so the first minute pays off
+	for _, t in { 0.25, 0.5, 0.75 } do
+		placeLantern(en.mouth:Lerp(en.a, t) + Vector3.new(0, 1, 0))
+	end
+	local rng = Random.new(Cave.settings.seed * 31 + 11)
+	local right = out:Cross(Vector3.yAxis).Unit
+	for _, pick in { { t = 0.3, side = 1, ore = 1 }, { t = 0.42, side = -1, ore = 1 }, { t = 0.6, side = 1, ore = 2 } } do
+		local from = en.mouth:Lerp(en.a, pick.t)
+		local dir = (right * pick.side + Vector3.new(0, -0.3, 0)).Unit
+		for s = 0.5, 24, 0.5 do
+			if airness(from + dir * s) < 0 then
+				local wall = from + dir * (s - 0.25)
+				local n = Vector3.new(
+					airness(wall + Vector3.xAxis) - airness(wall - Vector3.xAxis),
+					airness(wall + Vector3.yAxis) - airness(wall - Vector3.yAxis),
+					airness(wall + Vector3.zAxis) - airness(wall - Vector3.zAxis)
+				)
+				local normal = if n.Magnitude > 0 then n.Unit else -dir
+				placeOre(Cave.settings.ores[pick.ore], wall + normal * Cave.settings.oreOffset, normal, rng)
+				break
+			end
+		end
+	end
+
+	for _, other in Workspace:GetDescendants() do
+		if other:IsA("SpawnLocation") and other ~= pad then
+			other.Enabled = false
+		end
+	end
+	print("cave: spawn by the cave mouth at", en.mouth)
 	return pad.CFrame + Vector3.new(0, 3, 0)
 end
 

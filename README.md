@@ -24,7 +24,7 @@ procedural mines for roblox. every server gets a new one. tunnels generate aroun
 - stalactites, stalagmites and rubble in the plain rock bits
 - water settles in the real dips in the floor, only where it's walled in, with a pale flowstone rim round it. mineral streaks run down the walls
 - coal, iron, gold and diamond on the walls. they grow back after you mine them and your counts save
-- a spawn room with a minecart, crates and a lit first tunnel with easy ore in it
+- you spawn outside on the hills next to a cave mouth, with rails running in and a lantern-lit tunnel with some easy ore just inside
 - chunks load nearest first around players and unload when nobody's near. anything you dig stays dug
 
 ## controls

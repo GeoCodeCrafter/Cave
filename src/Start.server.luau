@@ -12,7 +12,8 @@ print("cave: seed", Cave.settings.seed)
 
 -- wipe whatever preview() left in the place so there aren't two copies of every ore
 Cave.clear()
-local spawnAt = Cave.buildSpawnRoom()
+-- you start outside on the hills next to a cave mouth. Cave.buildSpawnRoom() is the old underground room
+local spawnAt = Cave.buildSurfaceSpawn()
 Cave.start()
 
 local function spawn(player: Player)
