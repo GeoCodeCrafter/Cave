@@ -26,6 +26,13 @@ Cave.settings = {
 	-- rooms partway along passages, irregular, so a passage opens out before the next junction
 	roomChance = 0.45, -- per passage
 	roomRadius = 15,
+	-- what each passage looks like in cross-section. weights, they don't have to add up to anything
+	passageKinds = {
+		arched = 45, -- flat floor, arched ceiling
+		tube = 20, -- round, like it was full of water when it formed
+		canyon = 15, -- tall narrow slot, cut down by a stream
+		keyhole = 20, -- a round tube with a slot cut down under it
+	},
 	wiggle = 12, -- how far tunnels bend away from a straight line
 	bend = 0.013, -- how tight the bends are. much above 0.02 and tunnels tear into separate pockets
 	minRadius = 5.5, -- too thin and the terrain grid breaks tunnels apart
@@ -415,6 +422,24 @@ local function linkedTo(x: number, y: number, z: number): { Vector3 }
 	return out
 end
 
+-- the cross-section of the passage leaving this node in direction d, picked by weight
+local function passageKind(x: number, y: number, z: number, d: number): string
+	local kinds = Cave.settings.passageKinds
+	local total = 0
+	for _, w in kinds do
+		total += w
+	end
+	local roll = hash(x, y, z, 340 + d) * total
+	-- fixed order so the same seed always gives the same passages
+	for _, name in { "arched", "tube", "canyon", "keyhole" } do
+		roll -= kinds[name] or 0
+		if roll < 0 then
+			return name
+		end
+	end
+	return "arched"
+end
+
 -- what goes at a node, from how many tunnels meet there
 local function nodeKind(x: number, y: number, z: number): string
 	local s = Cave.settings
@@ -551,7 +576,7 @@ local function featuresFor(cx: number, cy: number, cz: number)
 						if hasLink(x, y, z, d) then
 							local b = nodeAt(x + step.X, y + step.Y, z + step.Z)
 							if touches(a, b) then
-								table.insert(tunnels, { a = a, ab = b - a, len2 = (b - a):Dot(b - a) })
+								table.insert(tunnels, { a = a, ab = b - a, len2 = (b - a):Dot(b - a), kind = passageKind(x, y, z, d) })
 							end
 							-- a room partway along some passages, so they open out instead of staying one width
 							if hash(x, y, z, 300 + d) < s.roomChance then
@@ -855,9 +880,25 @@ local function airness(p: Vector3): number
 	for _, t in f.tunnels do
 		local ap = q - t.a
 		local k = math.clamp(ap:Dot(t.ab) / t.len2, 0, 1)
-		-- squashed below the middle and stretched above: flatter floor, arched ceiling
 		local d = ap - t.ab * k
-		local v = r - Vector3.new(d.X, d.Y * (if d.Y < 0 then s.floorSquash else 0.85), d.Z).Magnitude
+		local across = Vector2.new(d.X, d.Z).Magnitude -- sideways from the middle of the passage
+		local v
+		if t.kind == "tube" then
+			-- round all the way, water filled it
+			v = r * 0.9 - d.Magnitude
+		elseif t.kind == "canyon" then
+			-- a tall slot: narrow, a little below the middle and a long way up
+			local half = math.max(3, r * 0.55)
+			v = math.min(half - across, r * 2.2 - d.Y, d.Y + r * 0.6)
+		elseif t.kind == "keyhole" then
+			-- a round tube up top, and a narrow slot cut down under it
+			local tube = r * 0.8 - (d - Vector3.new(0, r * 0.5, 0)).Magnitude
+			local slot = math.min(math.max(3, r * 0.4) - across, d.Y + r * 1.1, r * 0.6 - d.Y)
+			v = math.max(tube, slot)
+		else
+			-- arched: squashed below the middle and stretched above, flatter floor and arched ceiling
+			v = r - Vector3.new(d.X, d.Y * (if d.Y < 0 then s.floorSquash else 0.85), d.Z).Magnitude
+		end
 		if v > best then
 			best = v
 		end
@@ -3698,6 +3739,7 @@ Cave.network = {
 	hasNode = hasNode,
 	linkedTo = linkedTo,
 	nodeKind = nodeKind,
+	passageKind = passageKind,
 	unwarp = unwarp,
 }
 
