@@ -103,7 +103,9 @@ Cave.settings = {
 		[Enum.Material.Rock] = Color3.fromRGB(118, 110, 100),
 		[Enum.Material.Ground] = Color3.fromRGB(80, 66, 52),
 		-- crystal biome
-		[Enum.Material.Salt] = Color3.fromRGB(176, 166, 196),
+		-- the crystal cave floor. it was a pale lilac (176, 166, 196) and any light, your lamp or the
+		-- crystals' own, bleached it white. deep violet lets the glowing crystals stand out instead
+		[Enum.Material.Salt] = Color3.fromRGB(72, 58, 104),
 		[Enum.Material.Glacier] = Color3.fromRGB(116, 104, 176),
 		-- mushroom biome
 		[Enum.Material.Mud] = Color3.fromRGB(58, 50, 46),
