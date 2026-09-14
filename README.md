@@ -30,7 +30,7 @@ procedural mines for roblox. every server gets a new one. tunnels generate aroun
 
 equip the pickaxe (1) and hold click. hit ore to mine it, hit rock to dig through it. F throws a flare.
 
-it's properly dark down there. you've got a helmet lamp, and the big caverns have glowworms all over the ceiling.
+it's properly dark down there. you've got a helmet lamp, big caverns and galleries have glowworms all over the ceiling, and glowing fungus grows on their walls.
 
 ## setup
 

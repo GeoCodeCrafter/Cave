@@ -148,8 +148,12 @@ Cave.settings = {
 	-- 2 = 68 floating, 1 = 14, 0.5 = 2, and none buried at any of them
 	oreOffset = 0.5,
 	lantern = { color = Color3.fromRGB(255, 206, 158), brightness = 1.6, range = 36 },
-	glowwormChance = 0.3, -- per cavern ceiling voxel. tiny blue lights and hanging threads
+	glowwormChance = 0.3, -- per big-space ceiling voxel. tiny blue lights and hanging threads
 	glowwormColor = Color3.fromRGB(120, 205, 255),
+	-- big open spaces light themselves (lanterns only hang at junctions, and a gallery swallows your lamp)
+	bigSpace = 11, -- studs of open air 10 studs out from a surface before it counts as a big space
+	fungusChance = 0.02, -- per big-space wall voxel, a cluster of glowing shelf fungus with its own light
+	fungusColors = { Color3.fromRGB(255, 170, 70), Color3.fromRGB(120, 255, 190), Color3.fromRGB(190, 140, 255) },
 	roughness = 2.2, -- studs of bumps on the cave walls. 0 = smooth tubes
 	outcropChance = 0.03, -- per rock voxel on a surface, a slab of textured rock set into it
 	floorSquash = 1.7, -- how much flatter the floor is than the ceiling. 1 = round tubes
@@ -1563,14 +1567,49 @@ local function placeGlowworms(ceiling: Vector3, rng: Random)
 		glow(0.18, at - Vector3.new(0, len, 0))
 	end
 
-	if rng:NextNumber() < 0.06 then
+	if rng:NextNumber() < 0.15 then
 		local light = Instance.new("PointLight")
 		light.Color = color
-		light.Range = 18
-		light.Brightness = 0.8
+		light.Range = 26
+		light.Brightness = 0.9
 		light.Shadows = false
 		light.Parent = model:FindFirstChild("Glow")
 	end
+	keep(model, "Decor")
+end
+
+-- a cluster of glowing shelf fungus on a wall: flat round caps sticking out, one colour per
+-- cluster, and a light so a big space isn't just black past your lamp
+local function placeFungus(wall: Vector3, normal: Vector3, rng: Random)
+	local colors = Cave.settings.fungusColors
+	local color = colors[rng:NextInteger(1, #colors)]
+	local side = normal:Cross(Vector3.yAxis)
+	side = if side.Magnitude > 0.1 then side.Unit else Vector3.xAxis
+	local model = Instance.new("Model")
+	model.Name = "Fungus"
+	for i = 1, rng:NextInteger(3, 6) do
+		local d = rng:NextNumber(0.8, 2)
+		local cap = Instance.new("Part")
+		cap.Name = "Cap"
+		cap.Shape = Enum.PartType.Cylinder
+		cap.Anchored = true
+		cap.CanCollide = false
+		cap.CanQuery = false
+		cap.CastShadow = false
+		cap.Material = Enum.Material.Neon
+		cap.Color = color:Lerp(Color3.new(1, 1, 1), rng:NextNumber(0, 0.2))
+		-- a cylinder's axis is its x, so turn it upright to make a flat cap
+		cap.Size = Vector3.new(0.22, d, d)
+		local at = wall + normal * (d * 0.3) + side * rng:NextNumber(-1.6, 1.6) + Vector3.new(0, (i - 2) * 0.7 + rng:NextNumber(-0.3, 0.3), 0)
+		cap.CFrame = CFrame.new(at) * CFrame.Angles(0, 0, math.pi / 2) * CFrame.Angles(rng:NextNumber(-0.15, 0.15), 0, 0)
+		cap.Parent = model
+	end
+	local light = Instance.new("PointLight")
+	light.Color = color
+	light.Range = 22
+	light.Brightness = 1.1
+	light.Shadows = false
+	light.Parent = model:FindFirstChild("Cap")
 	keep(model, "Decor")
 end
 
@@ -2537,10 +2576,11 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 						local br = rng:NextNumber(1.8, 3.6)
 						terrain:FillBall(floor + Vector3.new(0, br * 0.2, 0), br, materialAt(fp, false))
 					end
-					-- glowworms, but only on cavern ceilings where there's a big roof to look up at
+					-- glowworms on the ceiling of any big space, caverns and wide galleries, so there's a
+					-- roof of little lights over them instead of black
 					if air[x][y - 1][z] and rng:NextNumber() < s.glowwormChance then
 						local cp = min + Vector3.new(x - 0.5, y - 0.5, z - 0.5) * VOXEL
-						if inCavern(cp) then
+						if inCavern(cp) or airness(cp - Vector3.new(0, 10, 0)) > s.bigSpace then
 							placeGlowworms((wallBetween(cp, -Vector3.yAxis)), rng)
 						end
 					end
@@ -2557,6 +2597,14 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 						if rng:NextNumber() < s.outcropChance and tubeClearance(p) < -3 then
 							local wall, normal = wallBetween(p, open)
 							placeOutcrop(wall, normal, p, rng)
+						end
+						-- glowing fungus on the walls of big spaces. not in the crystal caves or lava tubes,
+						-- they light themselves
+						if open.Y == 0 and rng:NextNumber() < s.fungusChance then
+							local wall, normal = wallBetween(p, open)
+							if airness(wall + normal * 10) > s.bigSpace and tubeClearance(p) < -3 and biomeAt(p) ~= "crystal" then
+								placeFungus(wall, normal, rng)
+							end
 						end
 						local ore = pickOre(p.Y, rng)
 						if ore then
