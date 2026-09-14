@@ -133,3 +133,19 @@
 **34 · a sinkhole from up top.** the orange blobs in the last one are these
 
 ![a sinkhole in the grass](progress/34-sinkhole-from-above.png)
+
+**35 · caves, not tunnels.** people on reddit said it was mostly tunnels and the terrain looked like an early 2000s game. both fair. passages open out into wide galleries now, there are rooms along the way, and the wall bumps that were smaller than the terrain grid (they came out as jagged facets) are gone. big spaces get glowworms and glowing fungus so they're not just black past your lamp
+
+![a big cave with pillars and glowworms](progress/35-bigger-caves.png)
+
+**36 · down a chasm.** rope bridges across one of the ravines, looking down between them
+
+![rope bridges across a chasm](progress/36-chasm-bridges.png)
+
+**37 · cut open.** a block of the new caves sliced in half with the debug cut-away. same block of rock had 16% air before, 33% now
+
+![the new caves in cross section](progress/37-caves-cut-open.png)
+
+**38 · where the biomes meet.** one of the new big caves with glowing mushrooms on one side, plain rock in the middle and crystals on the other, and a pool in front
+
+![mushroom, rock and crystal caves meeting in one big cave](progress/38-biomes-meet.png)
