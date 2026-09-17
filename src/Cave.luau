@@ -1328,6 +1328,20 @@ function Cave.applyLighting()
 	terrain.WaterWaveSpeed = 8
 
 	local atmosphere = getEffect("Atmosphere", "CaveAtmosphere") :: Atmosphere
+	-- new places come with their own Atmosphere, bloom, depth of field and sun rays. two atmospheres
+	-- fight and the cave's fog and darkness don't show, so in a running game set the others aside
+	-- (the place file itself isn't touched)
+	if RunService:IsRunning() then
+		for _, other in Lighting:GetChildren() do
+			if other:IsA("Atmosphere") and other ~= atmosphere then
+				other.Parent = nil
+			elseif other:IsA("DepthOfFieldEffect") or other:IsA("SunRaysEffect") then
+				other.Enabled = false
+			elseif other:IsA("BloomEffect") and other.Name ~= "CaveBloom" then
+				other.Enabled = false
+			end
+		end
+	end
 	-- starts as the daylight haze. underground each player's Atmosphere script swaps in the cave fog
 	atmosphere.Density = 0.3
 	atmosphere.Offset = 0
