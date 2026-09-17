@@ -4093,7 +4093,7 @@ local function breakOre(player: Player, model: Model, respawn: boolean)
 	end)
 end
 
-local function onMine(player: Player, model: Model)
+local function onMine(player: Player, model: Model, at: Vector3?)
 	local def = oreDef(model:GetAttribute("Ore"))
 	if not def or model:GetAttribute("Broken") then
 		return
@@ -4106,18 +4106,30 @@ local function onMine(player: Player, model: Model)
 
 	chips(model, def.color)
 	local hp = (model:GetAttribute("HP") or def.hits) - 1
+	-- a game can add its own feel to every hit (sounds, flashes, camera shake): hits left, out of how many
+	local function hitHook(left: number)
+		if Cave.onOreHit then
+			local ok, err = pcall(Cave.onOreHit, player, model, left, def.hits, at)
+			if not ok then
+				warn("cave: onOreHit failed:", err)
+			end
+		end
+	end
 	if hp > 0 then
 		model:SetAttribute("HP", hp)
 		shake(model)
+		hitHook(hp)
 		return
 	end
 	-- a game can say no to the last hit (a full backpack): the ore stays, one hit from breaking
 	if Cave.canTakeOre and not Cave.canTakeOre(player, def.name) then
 		model:SetAttribute("HP", 1)
 		shake(model)
+		hitHook(1)
 		return
 	end
 
+	hitHook(0)
 	breakOre(player, model, true)
 end
 
@@ -4381,7 +4393,7 @@ function Cave.enableDigging()
 		elseif target:IsA("BasePart") and target:IsDescendantOf(getOreFolder()) then
 			local model = target.Parent
 			if model and model:IsA("Model") then
-				onMine(player, model)
+				onMine(player, model, at)
 				hitSound(at)
 			end
 		end
