@@ -2899,9 +2899,19 @@ function Cave.around(pos: Vector3)
 	table.sort(todo, function(a, b)
 		return a.Magnitude < b.Magnitude
 	end)
+	-- only a few at a time, then back to the loop to check where people are now. near the top the
+	-- list is 1000+ chunks of far ground, and working through all of it first meant the tunnel right
+	-- in front of you waited minutes while you walked off the edge of the world
+	local budget = 6
 	for _, d in todo do
-		Cave.generateChunk(cx + d.X, cy + d.Y, cz + d.Z)
-		task.wait()
+		if not done[chunkKey(cx + d.X, cy + d.Y, cz + d.Z)] then
+			Cave.generateChunk(cx + d.X, cy + d.Y, cz + d.Z)
+			task.wait()
+			budget -= 1
+			if budget <= 0 then
+				break
+			end
+		end
 	end
 end
 
@@ -4511,6 +4521,18 @@ function Cave.showSeed()
 	label.Text = "seed " .. tostring(Cave.settings.seed)
 	label.Parent = gui
 	gui.Parent = StarterGui
+	-- people already in the game keep their old copy (it doesn't reset on respawn), so swap theirs
+	-- too. matters when a game changes the seed between rounds
+	for _, player in Players:GetPlayers() do
+		local playerGui = player:FindFirstChild("PlayerGui")
+		if playerGui then
+			local theirs = playerGui:FindFirstChild("CaveSeed")
+			if theirs then
+				theirs:Destroy()
+			end
+			gui:Clone().Parent = playerGui
+		end
+	end
 end
 
 function Cave.start()
