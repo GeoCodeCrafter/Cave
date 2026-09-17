@@ -4066,10 +4066,14 @@ local function breakOre(player: Player, model: Model, respawn: boolean)
 	model:SetAttribute("HP", nil)
 	shatter(model)
 
-	local stats = player:FindFirstChild("leaderstats")
-	local count = stats and stats:FindFirstChild(def.name) :: IntValue?
-	if count then
-		count.Value += 1
+	-- a game can take the ore itself (into a backpack, say); otherwise it goes on the leaderboard
+	local taken = Cave.onOreTaken and Cave.onOreTaken(player, def.name)
+	if not taken then
+		local stats = player:FindFirstChild("leaderstats")
+		local count = stats and stats:FindFirstChild(def.name) :: IntValue?
+		if count then
+			count.Value += 1
+		end
 	end
 
 	if not respawn then
@@ -4104,6 +4108,12 @@ local function onMine(player: Player, model: Model)
 	local hp = (model:GetAttribute("HP") or def.hits) - 1
 	if hp > 0 then
 		model:SetAttribute("HP", hp)
+		shake(model)
+		return
+	end
+	-- a game can say no to the last hit (a full backpack): the ore stays, one hit from breaking
+	if Cave.canTakeOre and not Cave.canTakeOre(player, def.name) then
+		model:SetAttribute("HP", 1)
 		shake(model)
 		return
 	end
