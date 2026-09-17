@@ -2849,7 +2849,16 @@ function Cave.generateChunk(cx: number, cy: number, cz: number)
 				end
 			end
 		end
-	end	collecting = nil
+	end
+	-- a game can add its own things to each chunk as it's built (trees on the surface, say). anything
+	-- it hands to Cave.keep() in here unloads and reloads with the chunk
+	if Cave.onChunk then
+		local ok, err = pcall(Cave.onChunk, cx, cy, cz, min)
+		if not ok then
+			warn("cave: onChunk failed:", err)
+		end
+	end
+	collecting = nil
 end
 
 -- the far ground: every ground-level chunk within surfaceRadius, plus the 4 under it wherever a
@@ -3045,6 +3054,28 @@ function Cave.chunksAround(spot: Vector3, radius: number?, withGround: boolean?)
 		return (a - middle).Magnitude < (b - middle).Magnitude
 	end)
 	return list
+end
+
+-- the ground layer (the hills, with anything cut through them) in a square of chunks round a spot,
+-- nearest first. a game can build this before sending people up top so they don't walk off an edge
+function Cave.buildGroundAround(center: Vector3, radius: number)
+	local groundCy = math.floor(Cave.settings.top / SIZE)
+	local cx, cz = math.floor(center.X / SIZE), math.floor(center.Z / SIZE)
+	local list = {}
+	for dx = -radius, radius do
+		for dz = -radius, radius do
+			table.insert(list, Vector3.new(dx, 0, dz))
+		end
+	end
+	table.sort(list, function(a, b)
+		return a.Magnitude < b.Magnitude
+	end)
+	for i, d in list do
+		Cave.generateChunk(cx + d.X, groundCy, cz + d.Z)
+		if RunService:IsRunning() and i % 4 == 0 then
+			task.wait()
+		end
+	end
 end
 
 function Cave.preview(center: Vector3?, radius: number?): Vector3
@@ -3746,6 +3777,9 @@ function Cave.buildSurfaceSpawn(near: Vector3?): CFrame
 	return pad.CFrame + Vector3.new(0, 3, 0)
 end
 
+-- for Cave.onChunk: puts a model in a folder in workspace and ties it to the chunk being built
+Cave.keep = keep
+
 -- the bits of the network the debug views and the editor plugin need to see
 Cave.SIZE = SIZE
 Cave.VOXEL = VOXEL
@@ -3865,8 +3899,21 @@ function Cave.measure()
 	end
 end
 
-function Cave.clear()
-	terrain:Clear()
+-- onlyMine: wipe just the chunks this module built, so a game with its own terrain somewhere else
+-- (a lobby island, say) keeps it. without it the whole terrain goes, which is what the edit tools want
+function Cave.clear(onlyMine: boolean?)
+	if onlyMine then
+		local n = 0
+		for _, c in chunkCoords do
+			terrain:FillBlock(CFrame.new(c * SIZE + Vector3.one * SIZE / 2), Vector3.one * SIZE, Enum.Material.Air)
+			n += 1
+			if RunService:IsRunning() and n % 40 == 0 then
+				task.wait()
+			end
+		end
+	else
+		terrain:Clear()
+	end
 	getOreFolder():ClearAllChildren()
 	getFolder("Lanterns"):ClearAllChildren()
 	getFolder("Decor"):ClearAllChildren()
@@ -4594,10 +4641,25 @@ function Cave.start()
 				local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
 				-- a game can park players somewhere with no mine (a lobby) by giving them CaveIgnore
 				if root and not player:GetAttribute("CaveIgnore") then
-					Cave.around(root.Position)
+					-- never let anyone walk or fall into a chunk that isn't there yet: hold them still,
+					-- build where they are and the chunk under it straight away, then let go
+					local p = root.Position
+					local cx, cy, cz = math.floor(p.X / SIZE), math.floor(p.Y / SIZE), math.floor(p.Z / SIZE)
+					if not (done[chunkKey(cx, cy, cz)] and done[chunkKey(cx, cy - 1, cz)]) then
+						if not root.Anchored then
+							root.Anchored = true
+							player:SetAttribute("CaveHeld", true)
+						end
+						Cave.generateChunk(cx, cy, cz)
+						Cave.generateChunk(cx, cy - 1, cz)
+					elseif player:GetAttribute("CaveHeld") then
+						root.Anchored = false
+						player:SetAttribute("CaveHeld", nil)
+					end
+					Cave.around(p)
 				end
 			end
-			task.wait(0.5)
+			task.wait(0.1)
 		end
 	end)
 end
