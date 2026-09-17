@@ -4105,7 +4105,15 @@ local function onMine(player: Player, model: Model, at: Vector3?)
 	lastHit[player] = now
 
 	chips(model, def.color)
-	local hp = (model:GetAttribute("HP") or def.hits) - 1
+	-- a game can make some hits count for more (a weak spot, a combo). 1 otherwise
+	local damage = 1
+	if Cave.oreDamage then
+		local ok, result = pcall(Cave.oreDamage, player, model, at)
+		if ok and type(result) == "number" then
+			damage = math.max(1, math.floor(result))
+		end
+	end
+	local hp = (model:GetAttribute("HP") or def.hits) - damage
 	-- a game can add its own feel to every hit (sounds, flashes, camera shake): hits left, out of how many
 	local function hitHook(left: number)
 		if Cave.onOreHit then
