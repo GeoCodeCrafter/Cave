@@ -2921,7 +2921,7 @@ function Cave.unloadFar()
 	local centers = {}
 	for _, player in Players:GetPlayers() do
 		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
-		if root then
+		if root and not player:GetAttribute("CaveIgnore") then
 			local p = root.Position
 			table.insert(centers, Vector3.new(math.floor(p.X / SIZE), math.floor(p.Y / SIZE), math.floor(p.Z / SIZE)))
 		end
@@ -4565,7 +4565,8 @@ function Cave.start()
 		while true do
 			for _, player in Players:GetPlayers() do
 				local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
-				if root then
+				-- a game can park players somewhere with no mine (a lobby) by giving them CaveIgnore
+				if root and not player:GetAttribute("CaveIgnore") then
 					Cave.around(root.Position)
 				end
 			end
