@@ -3567,6 +3567,11 @@ function Cave.buildSurfaceSpawn(near: Vector3?): CFrame
 			task.wait()
 		end
 	end
+	-- flatten the ground round the platform. it sat on the highest corner, so on a slope one end cut
+	-- into the hill: clear the ground above the floor and fill a level patch of grass just under it
+	terrain:FillCylinder(CFrame.new(spot.X, floorY + 7, spot.Z), 14, 11, Enum.Material.Air)
+	terrain:FillCylinder(CFrame.new(spot.X, floorY - 3.4, spot.Z), 5.6, 11, Enum.Material.Grass)
+
 	-- and round the junction the mouth tunnel runs down to. it's past the 2 chunks round the camp, and
 	-- without it you could see straight through the bottom of the hole to the sky
 	for i, ch in Cave.chunksAround(en.a, 1, false) do
